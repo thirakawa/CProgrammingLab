@@ -1,0 +1,45 @@
+{
+  "format": "cprogramlab-problem",
+  "version": "1",
+  "title": "scanfとprintfの使い方",
+  "description": "ある整数 `i` が標準入力から与えられる。\nこのとき、標準出力に標準入力から受け取った数字 `i` をprintf関数で表示するプログラムを作成せよ。\n\n### 入力される値\n\n```\ni\n```\n\n### 期待される出力値\n\n```\ni\n```\n\n### 制約\n\n- `i` は整数である",
+  "constraints": {
+    "max_vars": 2,
+    "max_arrays": 0,
+    "max_pointers": 0,
+    "max_loops": 0,
+    "max_ifs": 0
+  },
+  "sample_cases": [
+    {
+      "input": "99",
+      "expected_output": "99"
+    },
+    {
+      "input": "-10",
+      "expected_output": "-10"
+    }
+  ],
+  "test_cases": [
+    {
+      "input": "1",
+      "expected_output": "1"
+    },
+    {
+      "input": "25",
+      "expected_output": "25"
+    },
+    {
+      "input": "100",
+      "expected_output": "100"
+    },
+    {
+      "input": "1999",
+      "expected_output": "1999"
+    },
+    {
+      "input": "2147483647",
+      "expected_output": "2147483647"
+    }
+  ]
+}
