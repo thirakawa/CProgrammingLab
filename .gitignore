@@ -1,3 +1,7 @@
+# Claude Code
+# プロジェクトレベルの権限設定・セッションデータ（マシン固有のため除外）
+.claude/
+
 # Logs
 logs
 *.log
@@ -124,6 +128,12 @@ dist
 
 # Stores VSCode versions used for testing VSCode extensions
 .vscode-test
+
+# CProgramLab
+backend/data/
+.test-write
+__pycache__/
+*.pyc
 
 # pnpm
 .pnpm-store

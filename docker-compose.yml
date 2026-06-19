@@ -1,0 +1,52 @@
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: .devcontainer/Dockerfile
+      args:
+        - USER_UID=${DOCKER_UID}
+        - USER_GID=${DOCKER_GID}
+    image: cprogramlab-dev:latest
+    container_name: cprogramlab-dev
+    volumes:
+      - .:/workspace
+      - ${HOME}/.claude:/home/user/.claude
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+
+  backend:
+    build:
+      context: ./backend
+    container_name: cprogramlab-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - backend_data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp/cprogramlab:/tmp/cprogramlab
+    environment:
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - JUDGE_TMPDIR=/tmp/cprogramlab
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: cprogramlab-frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - BACKEND_URL=http://backend:8000
+      - NEXT_PUBLIC_API_URL=
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  backend_data:
