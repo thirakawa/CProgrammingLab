@@ -1,0 +1,266 @@
+'use client'
+
+import { useEffect, useState } from 'react'
+import {
+  apiGetAssignments,
+  apiGetResultSummary,
+  apiDownloadResultsCsv,
+  apiGetSubmissionCode,
+  apiDownloadCodeZip,
+  type Assignment,
+  type ResultSummaryItem,
+  type SubmissionCode,
+} from '@/lib/api'
+
+function formatElapsed(seconds: number | null): string {
+  if (seconds == null) return '-'
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return m > 0 ? `${m}分${s}秒` : `${s}秒`
+}
+
+function downloadCodeFile(username: string, code: string) {
+  const blob = new Blob([code], { type: 'text/plain' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${username}.c`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+export default function ResultsPage() {
+  const [assignments, setAssignments] = useState<Assignment[]>([])
+  const [selectedId, setSelectedId] = useState<number | ''>('')
+  const [summary, setSummary] = useState<ResultSummaryItem[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [downloading, setDownloading] = useState(false)
+  const [zipping, setZipping] = useState(false)
+
+  // コード閲覧モーダル
+  const [codeModal, setCodeModal] = useState<SubmissionCode | null>(null)
+  const [codeLoadingId, setCodeLoadingId] = useState<number | null>(null)
+
+  useEffect(() => {
+    apiGetAssignments().then(setAssignments).catch((e) => setError(e.message))
+  }, [])
+
+  useEffect(() => {
+    if (!selectedId) {
+      setSummary([])
+      return
+    }
+    setLoading(true)
+    setError('')
+    apiGetResultSummary(Number(selectedId))
+      .then(setSummary)
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [selectedId])
+
+  const handleViewCode = async (item: ResultSummaryItem) => {
+    if (!selectedId) return
+    setCodeLoadingId(item.user_id)
+    try {
+      const result = await apiGetSubmissionCode(Number(selectedId), item.user_id)
+      setCodeModal(result)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'コードの取得に失敗しました')
+    } finally {
+      setCodeLoadingId(null)
+    }
+  }
+
+  const handleDownloadCsv = async () => {
+    if (!selectedId) return
+    setDownloading(true)
+    try {
+      await apiDownloadResultsCsv(Number(selectedId))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'エラー')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  const handleDownloadZip = async () => {
+    if (!selectedId) return
+    setZipping(true)
+    try {
+      await apiDownloadCodeZip(Number(selectedId))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'エラー')
+    } finally {
+      setZipping(false)
+    }
+  }
+
+  const acCount = summary.filter((u) => u.score === 100).length
+
+  return (
+    <div>
+      <h1 className="text-2xl font-bold mb-6">採点結果</h1>
+      {error && <p className="text-red-500 mb-4">{error}</p>}
+
+      <div className="flex gap-3 items-end mb-6 flex-wrap">
+        <div>
+          <label className="block text-sm font-medium mb-1">課題を選択</label>
+          <select
+            value={selectedId}
+            onChange={(e) => setSelectedId(e.target.value ? Number(e.target.value) : '')}
+            className="border rounded px-3 py-2 w-64"
+          >
+            <option value="">-- 課題を選択 --</option>
+            {assignments.map((a) => (
+              <option key={a.id} value={a.id}>{a.title}</option>
+            ))}
+          </select>
+        </div>
+        {selectedId && (
+          <>
+            <button
+              onClick={handleDownloadCsv}
+              disabled={downloading}
+              className="bg-green-600 text-white rounded px-4 py-2 hover:bg-green-700 disabled:opacity-50 text-sm"
+            >
+              {downloading ? 'ダウンロード中...' : '採点結果 CSV'}
+            </button>
+            <button
+              onClick={handleDownloadZip}
+              disabled={zipping || summary.length === 0}
+              className="bg-blue-600 text-white rounded px-4 py-2 hover:bg-blue-700 disabled:opacity-50 text-sm"
+            >
+              {zipping ? '作成中...' : '提出コード 一括ZIP'}
+            </button>
+          </>
+        )}
+      </div>
+
+      {selectedId && (
+        <>
+          {loading && <p className="text-gray-400 text-sm mb-4">読み込み中...</p>}
+
+          {!loading && summary.length > 0 && (
+            <div className="flex gap-4 mb-4 text-sm">
+              <span className="bg-gray-100 rounded px-3 py-1 text-gray-600">
+                提出者数：<strong>{summary.length}</strong>人
+              </span>
+              <span className="bg-green-50 rounded px-3 py-1 text-green-700">
+                満点（100点）：<strong>{acCount}</strong>人
+              </span>
+            </div>
+          )}
+
+          {!loading && (
+            <div className="bg-white rounded-lg shadow overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b">
+                  <tr>
+                    <th className="text-left px-4 py-3">ユーザー名</th>
+                    <th className="text-left px-4 py-3">最新スコア</th>
+                    <th className="text-left px-4 py-3">ステータス</th>
+                    <th className="text-left px-4 py-3">提出回数</th>
+                    <th className="text-left px-4 py-3">解答時間</th>
+                    <th className="text-left px-4 py-3">最終提出日時</th>
+                    <th className="text-left px-4 py-3">提出コード</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {summary.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-8 text-center text-gray-400">
+                        提出がありません
+                      </td>
+                    </tr>
+                  )}
+                  {summary.map((item) => (
+                    <tr key={item.user_id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 font-medium">{item.username}</td>
+                      <td className="px-4 py-3">
+                        <span className={`font-bold ${item.score === 100 ? 'text-green-600' : item.score > 0 ? 'text-yellow-600' : 'text-red-500'}`}>
+                          {item.score}点
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge status={item.status} />
+                      </td>
+                      <td className="px-4 py-3 text-gray-500">{item.attempt_count}回</td>
+                      <td className="px-4 py-3 text-gray-500">{formatElapsed(item.elapsed_seconds)}</td>
+                      <td className="px-4 py-3 text-gray-500">
+                        {new Date(item.submitted_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
+                      </td>
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => handleViewCode(item)}
+                          disabled={codeLoadingId === item.user_id}
+                          className="text-blue-600 hover:text-blue-800 text-xs underline disabled:opacity-40"
+                        >
+                          {codeLoadingId === item.user_id ? '読込中...' : 'コード閲覧'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* コード閲覧モーダル */}
+      {codeModal && (
+        <div
+          className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
+          onClick={() => setCodeModal(null)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl w-full max-w-3xl flex flex-col"
+            style={{ maxHeight: '85vh' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between px-5 py-4 border-b shrink-0">
+              <div>
+                <h2 className="font-semibold text-base">{codeModal.username}.c</h2>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  最終提出：{new Date(codeModal.submitted_at).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
+                </p>
+              </div>
+              <div className="flex items-center gap-2 ml-4">
+                <button
+                  onClick={() => downloadCodeFile(codeModal.username, codeModal.code)}
+                  className="text-sm border rounded px-3 py-1.5 hover:bg-gray-50 text-gray-700"
+                >
+                  ダウンロード (.c)
+                </button>
+                <button
+                  onClick={() => setCodeModal(null)}
+                  className="text-gray-400 hover:text-gray-700 text-2xl leading-none px-1"
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+            <div className="overflow-auto flex-1 p-4 bg-gray-950 rounded-b-lg">
+              <pre className="text-xs font-mono text-gray-100 whitespace-pre leading-relaxed">
+                {codeModal.code}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const map: Record<string, { label: string; cls: string }> = {
+    done: { label: '採点済', cls: 'bg-green-100 text-green-700' },
+    CE: { label: 'CE', cls: 'bg-red-100 text-red-700' },
+    constraint_error: { label: '制約エラー', cls: 'bg-purple-100 text-purple-700' },
+    judging: { label: '採点中', cls: 'bg-yellow-100 text-yellow-700' },
+    pending: { label: '待機中', cls: 'bg-gray-100 text-gray-600' },
+  }
+  const s = map[status] ?? { label: status, cls: 'bg-gray-100 text-gray-600' }
+  return <span className={`px-2 py-0.5 rounded text-xs ${s.cls}`}>{s.label}</span>
+}
