@@ -35,14 +35,20 @@ def _migrate():
             except Exception:
                 pass
         # 孤立した class_members レコード（ユーザーが削除済み）を削除
-        conn.execute(text(
-            "DELETE FROM class_members WHERE user_id NOT IN (SELECT id FROM users)"
-        ))
-        conn.commit()
+        try:
+            conn.execute(text(
+                "DELETE FROM class_members WHERE user_id NOT IN (SELECT id FROM users)"
+            ))
+            conn.commit()
+        except Exception:
+            pass
 
 
-_migrate()
+# 先にテーブルを作成してから既存DBへのカラム追加マイグレーションを行う。
+# 初回起動時（テーブルが1つも存在しない状態）に _migrate() を先に実行すると
+# ALTER TABLE / DELETE の対象テーブルが存在せず失敗するため、この順序が必須。
 models.Base.metadata.create_all(bind=engine)
+_migrate()
 
 app = FastAPI(title="CProgramLab API", version="1.0.0")
 
