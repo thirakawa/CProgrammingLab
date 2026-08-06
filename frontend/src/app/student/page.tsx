@@ -69,6 +69,11 @@ export default function StudentDashboard() {
                 <p className="text-sm text-gray-500 mt-1">
                   締切：{formatJST(a.close_at)}
                 </p>
+                {a.start_deadline && a.my_status === 'not_started' && (
+                  <p className="text-xs text-orange-500 mt-0.5">
+                    解答開始期限：{formatJST(a.start_deadline)}
+                  </p>
+                )}
               </div>
               <Link
                 href={`/student/assignments/${a.id}`}

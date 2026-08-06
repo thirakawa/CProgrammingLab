@@ -36,6 +36,11 @@ class ChangePasswordRequest(BaseModel):
     new_password: str
 
 
+class PasswordResetRequest(BaseModel):
+    """教員・TAが他ユーザーのパスワードをリセットする際に使用"""
+    password: str
+
+
 # --- TestCase ---
 class TestCaseCreate(BaseModel):
     input: str = ""
@@ -160,6 +165,7 @@ class AssignmentCreate(BaseModel):
     class_id: int
     open_at: datetime
     close_at: datetime
+    start_deadline: Optional[datetime] = None
 
 
 class AssignmentUpdate(BaseModel):
@@ -168,6 +174,7 @@ class AssignmentUpdate(BaseModel):
     class_id: Optional[int] = None
     open_at: Optional[datetime] = None
     close_at: Optional[datetime] = None
+    start_deadline: Optional[datetime] = None
 
 
 class AssignmentOut(BaseModel):
@@ -178,6 +185,7 @@ class AssignmentOut(BaseModel):
     class_id: Optional[int]
     open_at: datetime
     close_at: datetime
+    start_deadline: Optional[datetime] = None
     created_by: int
     created_at: datetime
     # 学生向け：not_started / in_progress / submitted（教員には None）

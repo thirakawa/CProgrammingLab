@@ -18,7 +18,7 @@ export default function LoginPage() {
     setLoading(true)
     try {
       const u = await login(username, password)
-      router.replace(u.role === 'teacher' ? '/teacher' : '/student')
+      router.replace(u.role === 'teacher' ? '/teacher' : u.role === 'ta' ? '/ta' : '/student')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'ログインに失敗しました')
     } finally {

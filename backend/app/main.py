@@ -15,6 +15,7 @@ def _migrate():
         for stmt in [
             "ALTER TABLE users ADD COLUMN is_superadmin BOOLEAN NOT NULL DEFAULT 0",
             "ALTER TABLE assignments ADD COLUMN class_id INTEGER REFERENCES classes(id)",
+            "ALTER TABLE assignments ADD COLUMN start_deadline DATETIME",
             # コード制約
             "ALTER TABLE problems ADD COLUMN max_vars INTEGER",
             "ALTER TABLE problems ADD COLUMN max_arrays INTEGER",

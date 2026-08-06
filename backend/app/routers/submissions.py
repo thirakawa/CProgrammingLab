@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -8,6 +9,20 @@ from .. import models, schemas
 from ..judge import run_judge, run_sample
 
 router = APIRouter(prefix="/api/v1/submissions", tags=["submissions"])
+
+
+_DEDUCTION_KEYS = ("deduct_warn", "deduct_var", "deduct_arr", "deduct_ptr", "deduct_loop", "deduct_if")
+
+
+def _is_perfect(submission: models.Submission) -> bool:
+    """全テストケースAC・減点なし（満点）の提出かどうかを判定する"""
+    if submission.status != "accepted" or not submission.score_detail:
+        return False
+    try:
+        detail = json.loads(submission.score_detail)
+    except (TypeError, ValueError):
+        return False
+    return all(detail.get(k, 0) == 0 for k in _DEDUCTION_KEYS)
 
 
 @router.post("/run", response_model=schemas.SampleRunResponse)
@@ -72,6 +87,17 @@ def submit(
             now = datetime.utcnow()
             if now > assignment.close_at:
                 raise HTTPException(status_code=403, detail="提出期限が過ぎています")
+            latest = (
+                db.query(models.Submission)
+                .filter(
+                    models.Submission.user_id == current_user.id,
+                    models.Submission.assignment_id == body.assignment_id,
+                )
+                .order_by(models.Submission.submitted_at.desc())
+                .first()
+            )
+            if latest and _is_perfect(latest):
+                raise HTTPException(status_code=403, detail="既に満点で提出済みのため、再提出できません")
         # AssignmentStart から開始時刻を取得してサーバー側で elapsed_seconds を計算
         start_record = db.query(models.AssignmentStart).filter_by(
             assignment_id=body.assignment_id,

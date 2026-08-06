@@ -25,6 +25,18 @@ function jstToUTC(jstLocal: string): string {
   return new Date(jstLocal + '+09:00').toISOString()
 }
 
+// 解答開始期限が公開開始〜締切の範囲内かをクライアント側でも検証する
+function validateStartDeadline(openAt: string, closeAt: string, startDeadline: string): string | null {
+  if (!startDeadline) return null
+  const open = new Date(openAt + '+09:00')
+  const close = new Date(closeAt + '+09:00')
+  const deadline = new Date(startDeadline + '+09:00')
+  if (deadline < open || deadline > close) {
+    return '解答開始期限は公開開始日時〜締切日時の範囲内に設定してください'
+  }
+  return null
+}
+
 function formatJST(iso: string) {
   return new Date(iso).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })
 }
@@ -81,12 +93,13 @@ export default function ClassDetailPage() {
     problemId: '' as number | '',
     openAt: toJSTDatetimeValue(initNow),
     closeAt: toJSTDatetimeValue(initLater),
+    startDeadline: '',
   })
   const [assSubmitting, setAssSubmitting] = useState(false)
 
   // 課題編集モーダル
   const [editAssModal, setEditAssModal] = useState<Assignment | null>(null)
-  const [editAssForm, setEditAssForm] = useState({ title: '', openAt: '', closeAt: '' })
+  const [editAssForm, setEditAssForm] = useState({ title: '', openAt: '', closeAt: '', startDeadline: '' })
   const [editAssSubmitting, setEditAssSubmitting] = useState(false)
 
   // 採点結果タブ
@@ -242,6 +255,8 @@ export default function ClassDetailPage() {
   const handleCreateAssignment = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!assForm.problemId) return setError('問題を選択してください')
+    const deadlineError = validateStartDeadline(assForm.openAt, assForm.closeAt, assForm.startDeadline)
+    if (deadlineError) return setError(deadlineError)
     setError('')
     setAssSubmitting(true)
     try {
@@ -251,10 +266,11 @@ export default function ClassDetailPage() {
         class_id: classId,
         open_at: jstToUTC(assForm.openAt),
         close_at: jstToUTC(assForm.closeAt),
+        start_deadline: assForm.startDeadline ? jstToUTC(assForm.startDeadline) : null,
       })
       const freshNow = new Date()
       const freshLater = new Date(freshNow.getTime() + 7 * 24 * 60 * 60 * 1000)
-      setAssForm({ title: '', problemId: '', openAt: toJSTDatetimeValue(freshNow), closeAt: toJSTDatetimeValue(freshLater) })
+      setAssForm({ title: '', problemId: '', openAt: toJSTDatetimeValue(freshNow), closeAt: toJSTDatetimeValue(freshLater), startDeadline: '' })
       flash('課題を作成しました')
       loadAssignments()
     } catch (e) {
@@ -270,18 +286,23 @@ export default function ClassDetailPage() {
       title: a.title,
       openAt: toJSTDatetimeValue(new Date(a.open_at)),
       closeAt: toJSTDatetimeValue(new Date(a.close_at)),
+      startDeadline: a.start_deadline ? toJSTDatetimeValue(new Date(a.start_deadline)) : '',
     })
   }
 
   const handleUpdateAssignment = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!editAssModal) return
+    const deadlineError = validateStartDeadline(editAssForm.openAt, editAssForm.closeAt, editAssForm.startDeadline)
+    if (deadlineError) return setError(deadlineError)
+    setError('')
     setEditAssSubmitting(true)
     try {
       const updated = await apiUpdateAssignment(editAssModal.id, {
         title: editAssForm.title,
         open_at: jstToUTC(editAssForm.openAt),
         close_at: jstToUTC(editAssForm.closeAt),
+        start_deadline: editAssForm.startDeadline ? jstToUTC(editAssForm.startDeadline) : null,
       })
       setAssignments(prev => prev.map(a => a.id === updated.id ? updated : a))
       setEditAssModal(null)
@@ -442,6 +463,18 @@ export default function ClassDetailPage() {
                 required
               />
             </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">解答開始期限（任意・日本時間）</label>
+            <input
+              type="datetime-local"
+              value={editAssForm.startDeadline}
+              onChange={e => setEditAssForm({ ...editAssForm, startDeadline: e.target.value })}
+              className="w-full border rounded px-3 py-2 text-sm max-w-xs"
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              設定すると、この時刻までに初回アクセス（解答開始）しなかった学生はこの課題に取り組めなくなります。未設定なら制限なし。
+            </p>
           </div>
           <div className="flex gap-2 justify-end pt-2">
             <button type="button" onClick={() => setEditAssModal(null)} className="border rounded px-4 py-2 text-sm hover:bg-gray-50">
@@ -706,6 +739,9 @@ export default function ClassDetailPage() {
                           {a.problem_title && (
                             <div className="text-xs text-gray-400 mt-0.5">問題: {a.problem_title}</div>
                           )}
+                          {a.start_deadline && (
+                            <div className="text-xs text-orange-500 mt-0.5">開始期限: {formatJST(a.start_deadline)}</div>
+                          )}
                         </td>
                         <td className="px-3 py-2 text-gray-600">{formatJST(a.open_at)}</td>
                         <td className="px-3 py-2 text-gray-600">{formatJST(a.close_at)}</td>
@@ -776,6 +812,18 @@ export default function ClassDetailPage() {
                     required
                   />
                 </div>
+              </div>
+              <div className="max-w-md">
+                <label className="block text-sm font-medium mb-1">解答開始期限（任意・日本時間）</label>
+                <input
+                  type="datetime-local"
+                  value={assForm.startDeadline}
+                  onChange={e => setAssForm({ ...assForm, startDeadline: e.target.value })}
+                  className="w-full border rounded px-3 py-2"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  設定すると、この時刻までに初回アクセス（解答開始）しなかった学生はこの課題に取り組めなくなります。未設定なら制限なし。
+                </p>
               </div>
               <button
                 type="submit"

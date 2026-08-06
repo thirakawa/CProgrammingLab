@@ -37,6 +37,19 @@ function formatElapsed(seconds: number): string {
   return m > 0 ? `${m}分${s}秒` : `${s}秒`
 }
 
+const DEDUCTION_KEYS = ['deduct_warn', 'deduct_var', 'deduct_arr', 'deduct_ptr', 'deduct_loop', 'deduct_if'] as const
+
+// 全テストケースAC・減点なし（満点）の提出かどうかを判定する
+function isPerfectSubmission(sub: Submission | null): boolean {
+  if (!sub || sub.status !== 'accepted' || !sub.score_detail) return false
+  try {
+    const detail = JSON.parse(sub.score_detail) as Record<string, number>
+    return DEDUCTION_KEYS.every(k => !detail[k])
+  } catch {
+    return false
+  }
+}
+
 type Mode = 'editing' | 'completed' | 'resubmitting'
 
 interface ScoreDetail {
@@ -124,6 +137,7 @@ export default function AssignmentPage() {
   const [running, setRunning] = useState(false)
   const [error, setError] = useState('')
   const [isBeforeOpen, setIsBeforeOpen] = useState(false)
+  const [startDeadlinePassed, setStartDeadlinePassed] = useState(false)
 
   useEffect(() => {
     const load = async () => {
@@ -152,10 +166,13 @@ export default function AssignmentPage() {
         try {
           const { started_at } = await apiStartAssignment(Number(id))
           setStartedAt(new Date(started_at))
-        } catch {
+        } catch (e) {
           // 締切後で開始記録がない場合はフォールバック
           if (latest?.started_at) {
             setStartedAt(new Date(latest.started_at))
+          } else if (!latest && e instanceof Error && e.message.includes('解答開始期限')) {
+            // 開始記録がなく、解答開始期限を過ぎている場合はブロック画面を表示
+            setStartDeadlinePassed(true)
           }
         }
       } catch (e) {
@@ -244,6 +261,22 @@ export default function AssignmentPage() {
     )
   }
 
+  if (startDeadlinePassed) {
+    return (
+      <div>
+        <h1 className="text-2xl font-bold mb-4">{assignment.title}</h1>
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+          <p className="text-red-700 font-medium">解答開始期限を過ぎたため、この課題に取り組むことはできません</p>
+          {assignment.start_deadline && (
+            <p className="text-sm text-red-600 mt-1">
+              解答開始期限：{new Date(assignment.start_deadline).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
+            </p>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   const closeAt = new Date(assignment.close_at)
   const isExpired = closeAt < new Date()
   const problem = assignment.problem
@@ -251,6 +284,7 @@ export default function AssignmentPage() {
   const hasSamples = sampleCases.length > 0
   const editorReadOnly = isExpired || mode === 'completed'
   const canEdit = !isExpired && mode !== 'completed'
+  const isPerfect = mode === 'completed' && isPerfectSubmission(currentResult)
 
   return (
     <div>
@@ -363,7 +397,7 @@ export default function AssignmentPage() {
       )}
 
       {/* 完了状態の再提出ボタン */}
-      {mode === 'completed' && !isExpired && (
+      {mode === 'completed' && !isExpired && !isPerfect && (
         <div className="mb-8">
           <button
             onClick={handleStartResubmit}
@@ -371,6 +405,11 @@ export default function AssignmentPage() {
           >
             再提出する
           </button>
+        </div>
+      )}
+      {mode === 'completed' && isPerfect && (
+        <div className="mb-8 bg-green-50 border border-green-200 rounded-lg px-5 py-3 text-green-700 text-sm font-medium">
+          🎉 全問正解・減点なしで満点です。これ以上の提出はできません。
         </div>
       )}
 

@@ -14,6 +14,8 @@ export default function Home() {
       router.replace('/login')
     } else if (user.role === 'teacher') {
       router.replace('/teacher')
+    } else if (user.role === 'ta') {
+      router.replace('/ta')
     } else {
       router.replace('/student')
     }

@@ -76,6 +76,7 @@ class Assignment(Base):
     class_id = Column(Integer, ForeignKey("classes.id"), nullable=True)
     open_at = Column(DateTime, nullable=False)
     close_at = Column(DateTime, nullable=False)
+    start_deadline = Column(DateTime, nullable=True)  # この時刻までに開始しないとアクセス不可（NULL = 制限なし）
     created_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 

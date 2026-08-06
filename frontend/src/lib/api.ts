@@ -28,7 +28,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 export interface User {
   id: number
   username: string
-  role: 'teacher' | 'student'
+  role: 'teacher' | 'student' | 'ta'
   is_superadmin?: boolean
 }
 
@@ -82,6 +82,8 @@ export interface Assignment {
   }
   open_at: string
   close_at: string
+  /** この時刻までに開始しないとアクセス不可（null = 制限なし） */
+  start_deadline?: string | null
   created_by: number
   /** 学生向けステータス: not_started / in_progress / submitted */
   my_status?: string | null
@@ -168,6 +170,11 @@ export async function apiDeleteUser(id: number): Promise<void> {
   return req<void>(`/users/${id}`, { method: 'DELETE' })
 }
 
+/** 教員・TAが他ユーザー（TAは学生のみ）のパスワードをリセットする */
+export async function apiResetPassword(userId: number, password: string): Promise<User> {
+  return req<User>(`/users/${userId}/reset_password`, { method: 'PUT', body: JSON.stringify({ password }) })
+}
+
 // --- Problems ---
 export async function apiGetProblems(): Promise<Problem[]> {
   return req<Problem[]>('/problems')
@@ -244,6 +251,7 @@ export async function apiCreateAssignment(data: {
   class_id: number
   open_at: string
   close_at: string
+  start_deadline?: string | null
 }): Promise<Assignment> {
   return req<Assignment>('/assignments', { method: 'POST', body: JSON.stringify(data) })
 }
@@ -252,6 +260,7 @@ export async function apiUpdateAssignment(id: number, data: {
   title?: string
   open_at?: string
   close_at?: string
+  start_deadline?: string | null
 }): Promise<Assignment> {
   return req<Assignment>(`/assignments/${id}`, { method: 'PUT', body: JSON.stringify(data) })
 }

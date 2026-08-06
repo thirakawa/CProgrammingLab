@@ -49,3 +49,9 @@ def require_teacher(current_user: models.User = Depends(get_current_user)) -> mo
     if current_user.role != "teacher":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="教員権限が必要です")
     return current_user
+
+
+def require_teacher_or_ta(current_user: models.User = Depends(get_current_user)) -> models.User:
+    if current_user.role not in ("teacher", "ta"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="教員またはTA権限が必要です")
+    return current_user

@@ -9,12 +9,22 @@ from .. import models, schemas
 router = APIRouter(prefix="/api/v1/assignments", tags=["assignments"])
 
 
+def _validate_start_deadline(open_at: datetime, close_at: datetime, start_deadline: datetime | None) -> None:
+    if start_deadline is None:
+        return
+    if not (open_at <= start_deadline <= close_at):
+        raise HTTPException(
+            status_code=400,
+            detail="解答開始期限は課題の公開期間（公開開始〜締切）の範囲内に設定してください",
+        )
+
+
 @router.get("", response_model=list[schemas.AssignmentOut])
 def list_assignments(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    if current_user.role == "teacher":
+    if current_user.role in ("teacher", "ta"):
         return db.query(models.Assignment).order_by(models.Assignment.created_at.desc()).all()
 
     # 学生: 自分が所属するクラスの公開中課題のみ
@@ -79,12 +89,14 @@ def create_assignment(
         raise HTTPException(status_code=404, detail="問題が見つかりません")
     if not db.get(models.Class, body.class_id):
         raise HTTPException(status_code=404, detail="クラスが見つかりません")
+    _validate_start_deadline(body.open_at, body.close_at, body.start_deadline)
     assignment = models.Assignment(
         title=body.title,
         problem_id=body.problem_id,
         class_id=body.class_id,
         open_at=body.open_at,
         close_at=body.close_at,
+        start_deadline=body.start_deadline,
         created_by=current_user.id,
     )
     db.add(assignment)
@@ -141,6 +153,8 @@ def start_assignment(
     now = datetime.utcnow()
     if now < assignment.open_at:
         raise HTTPException(status_code=403, detail="この課題はまだ開始されていません")
+    if assignment.start_deadline is not None and now > assignment.start_deadline:
+        raise HTTPException(status_code=403, detail="解答開始期限を過ぎているため、この課題を開始できません")
     if now > assignment.close_at:
         raise HTTPException(status_code=403, detail="この課題は締め切られました")
 
@@ -178,6 +192,15 @@ def update_assignment(
         assignment.open_at = body.open_at
     if body.close_at is not None:
         assignment.close_at = body.close_at
+
+    # start_deadline は None を明示指定すると「制限なし」にリセットできる
+    new_start_deadline = (
+        body.start_deadline if "start_deadline" in body.model_fields_set else assignment.start_deadline
+    )
+    _validate_start_deadline(assignment.open_at, assignment.close_at, new_start_deadline)
+    if "start_deadline" in body.model_fields_set:
+        assignment.start_deadline = body.start_deadline
+
     db.commit()
     db.refresh(assignment)
     return assignment

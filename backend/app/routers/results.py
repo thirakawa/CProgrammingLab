@@ -7,7 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..deps import require_teacher
+from ..deps import require_teacher_or_ta
 from .. import models, schemas
 
 router = APIRouter(prefix="/api/v1/results", tags=["results"])
@@ -41,7 +41,7 @@ def _latest_submissions(db: Session, assignment_id: int) -> list[models.Submissi
 def get_summary(
     assignment_id: int = Query(..., description="課題ID"),
     db: Session = Depends(get_db),
-    _: models.User = Depends(require_teacher),
+    _: models.User = Depends(require_teacher_or_ta),
 ):
     """課題に対する各ユーザーの最新提出サマリーを返す（ユーザー1人につき1件）"""
     assignment = db.get(models.Assignment, assignment_id)
@@ -80,7 +80,7 @@ def get_summary(
 def download_code_zip(
     assignment_id: int = Query(..., description="課題ID"),
     db: Session = Depends(get_db),
-    _: models.User = Depends(require_teacher),
+    _: models.User = Depends(require_teacher_or_ta),
 ):
     """各学生の最新提出コードを一括でZIPダウンロード"""
     assignment = db.get(models.Assignment, assignment_id)
@@ -110,7 +110,7 @@ def get_code(
     assignment_id: int = Query(..., description="課題ID"),
     user_id: int = Query(..., description="ユーザーID"),
     db: Session = Depends(get_db),
-    _: models.User = Depends(require_teacher),
+    _: models.User = Depends(require_teacher_or_ta),
 ):
     """指定ユーザーの最新提出コードを返す"""
     sub = (
@@ -136,7 +136,7 @@ def get_code(
 def export_csv(
     assignment_id: int = Query(..., description="課題ID"),
     db: Session = Depends(get_db),
-    _: models.User = Depends(require_teacher),
+    _: models.User = Depends(require_teacher_or_ta),
 ):
     assignment = db.get(models.Assignment, assignment_id)
     if not assignment:
