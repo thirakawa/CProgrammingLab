@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import {
   apiGetClass, apiResetPassword,
-  apiGetAssignments, apiGetResultSummary, apiDownloadResultsCsv,
+  apiGetAssignments, apiGetResultSummary, apiDownloadResultsCsv, apiDownloadLatestResultsCsv,
   apiGetSubmissionCode, apiDownloadCodeZip,
   type ClassDetail, type Assignment,
   type ResultSummaryItem, type SubmissionCode,
@@ -48,6 +48,7 @@ export default function TaClassDetailPage() {
   const [summary, setSummary] = useState<ResultSummaryItem[]>([])
   const [summaryLoading, setSummaryLoading] = useState(false)
   const [csvDownloading, setCsvDownloading] = useState(false)
+  const [latestCsvDownloading, setLatestCsvDownloading] = useState(false)
   const [zipping, setZipping] = useState(false)
   const [codeModal, setCodeModal] = useState<SubmissionCode | null>(null)
   const [codeLoadingId, setCodeLoadingId] = useState<number | null>(null)
@@ -115,6 +116,18 @@ export default function TaClassDetailPage() {
       setError(e instanceof Error ? e.message : 'エラー')
     } finally {
       setCsvDownloading(false)
+    }
+  }
+
+  const handleDownloadLatestCsv = async () => {
+    if (!selectedAssId) return
+    setLatestCsvDownloading(true)
+    try {
+      await apiDownloadLatestResultsCsv(Number(selectedAssId))
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'エラー')
+    } finally {
+      setLatestCsvDownloading(false)
     }
   }
 
@@ -271,7 +284,14 @@ export default function TaClassDetailPage() {
                   disabled={csvDownloading}
                   className="bg-green-600 text-white rounded px-4 py-2 hover:bg-green-700 disabled:opacity-50 text-sm"
                 >
-                  {csvDownloading ? 'ダウンロード中...' : '採点結果 CSV'}
+                  {csvDownloading ? 'ダウンロード中...' : '採点結果 CSV（全履歴）'}
+                </button>
+                <button
+                  onClick={handleDownloadLatestCsv}
+                  disabled={latestCsvDownloading}
+                  className="bg-emerald-600 text-white rounded px-4 py-2 hover:bg-emerald-700 disabled:opacity-50 text-sm"
+                >
+                  {latestCsvDownloading ? 'ダウンロード中...' : '最新結果 CSV（全学生）'}
                 </button>
                 <button
                   onClick={handleDownloadZip}

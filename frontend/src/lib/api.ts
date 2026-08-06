@@ -446,3 +446,18 @@ export async function apiDownloadResultsCsv(assignmentId: number): Promise<void>
   a.click()
   URL.revokeObjectURL(url)
 }
+
+/** クラス全学生の最新スコアのみをCSVでダウンロードする（未提出者も空欄行として含む） */
+export async function apiDownloadLatestResultsCsv(assignmentId: number): Promise<void> {
+  const res = await fetch(`${BASE}/results/csv/latest?assignment_id=${assignmentId}`, {
+    credentials: 'include',
+  })
+  if (!res.ok) throw new Error('CSVの取得に失敗しました')
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `results_assignment_${assignmentId}_latest.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}

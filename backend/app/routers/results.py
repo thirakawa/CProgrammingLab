@@ -76,6 +76,75 @@ def get_summary(
     return sorted(result, key=lambda x: x.username)
 
 
+@router.get("/csv/latest")
+def export_latest_csv(
+    assignment_id: int = Query(..., description="課題ID"),
+    db: Session = Depends(get_db),
+    _: models.User = Depends(require_teacher_or_ta),
+):
+    """クラス全学生の最新スコアをCSVで出力する（未提出の学生も空欄行として出力）"""
+    assignment = db.get(models.Assignment, assignment_id)
+    if not assignment:
+        raise HTTPException(status_code=404, detail="課題が見つかりません")
+
+    students: list[models.User] = []
+    if assignment.class_id:
+        members = (
+            db.query(models.ClassMember)
+            .filter(models.ClassMember.class_id == assignment.class_id)
+            .all()
+        )
+        students = [m.student for m in members if m.student and m.student.role == "student"]
+
+    latest_subs = {sub.user_id: sub for sub in _latest_submissions(db, assignment_id)}
+
+    # クラス名簿に残っていない（除籍済みなど）が提出履歴のあるユーザーも念のため含める
+    known_ids = {s.id for s in students}
+    for uid, sub in latest_subs.items():
+        if uid not in known_ids and sub.user and sub.user.role == "student":
+            students.append(sub.user)
+            known_ids.add(uid)
+
+    students.sort(key=lambda u: u.username)
+
+    counts = dict(
+        db.query(models.Submission.user_id, func.count(models.Submission.id))
+        .filter(models.Submission.assignment_id == assignment_id)
+        .group_by(models.Submission.user_id)
+        .all()
+    )
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "ユーザーID", "ユーザー名", "最新スコア", "ステータス",
+        "提出回数", "解答時間(秒)", "最終提出日時",
+    ])
+
+    for student in students:
+        sub = latest_subs.get(student.id)
+        if sub:
+            writer.writerow([
+                student.id,
+                student.username,
+                sub.score,
+                sub.status,
+                counts.get(student.id, 0),
+                sub.elapsed_seconds if sub.elapsed_seconds is not None else "",
+                sub.submitted_at.isoformat(),
+            ])
+        else:
+            writer.writerow([student.id, student.username, "", "未提出", 0, "", ""])
+
+    output.seek(0)
+    filename = f"assignment_{assignment_id}_latest_results.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
 @router.get("/code/zip")
 def download_code_zip(
     assignment_id: int = Query(..., description="課題ID"),
