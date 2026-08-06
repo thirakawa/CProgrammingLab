@@ -283,6 +283,9 @@ export default function EditProblemPage() {
               required
             />
           )}
+          <p className="text-xs text-gray-400 mt-1">
+            数式はLaTeX記法で記述できます（例：インライン $x^2 + y^2 = z^2$ ／ ブロック $$\int_0^1 x\,dx$$）
+          </p>
         </div>
 
         {/* コード制約 */}
