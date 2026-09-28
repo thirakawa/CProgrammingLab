@@ -25,10 +25,13 @@ services:
       - ./backend:/app
       - backend_data:/app/data
       - /var/run/docker.sock:/var/run/docker.sock
-      - /tmp/cprogramlab:/tmp/cprogramlab
+      # 注意: /tmp 以下は systemd-tmpfiles により定期的に自動削除されるため使用しないこと
+      # （/usr/lib/tmpfiles.d/tmp.conf の "q /tmp ... 10d" ルールで10日間未アクセスのファイルが削除される。
+      #  ジャッジ用ディレクトリがホスト側から消えるとバインドマウントが無効化され、採点が全て失敗する）
+      - ${JUDGE_TMPDIR:-/var/lib/cprogramlab/judge-tmp}:${JUDGE_TMPDIR:-/var/lib/cprogramlab/judge-tmp}
     environment:
       - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
-      - JUDGE_TMPDIR=/tmp/cprogramlab
+      - JUDGE_TMPDIR=${JUDGE_TMPDIR:-/var/lib/cprogramlab/judge-tmp}
     restart: unless-stopped
 
   frontend:
