@@ -1,6 +1,7 @@
+import re
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 
 # --- User ---
@@ -41,11 +42,48 @@ class PasswordResetRequest(BaseModel):
     password: str
 
 
+# --- テストケース／サンプルケースの添付ファイル ---
+# ソース・実行ファイルと同じディレクトリに配置し、プログラムが fopen 等で読み込む用途（*.txt, *.csv のみ）
+_FILENAME_RE = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_\-.]{0,63}\.(txt|csv)$')
+MAX_FILE_CONTENT_LEN = 262144   # 1ファイルあたり最大256KB
+MAX_FILES_PER_CASE = 5          # 1ケースあたり最大5ファイル
+
+
+class CaseFileCreate(BaseModel):
+    filename: str
+    content: str = ""
+
+    @field_validator("filename")
+    @classmethod
+    def _validate_filename(cls, v: str) -> str:
+        if not _FILENAME_RE.match(v):
+            raise ValueError(
+                "ファイル名は半角英数字・._- のみで、拡張子は .txt または .csv にしてください（パス区切りは使用不可）"
+            )
+        return v
+
+    @field_validator("content")
+    @classmethod
+    def _validate_content_length(cls, v: str) -> str:
+        if len(v) > MAX_FILE_CONTENT_LEN:
+            raise ValueError(f"ファイルの内容は{MAX_FILE_CONTENT_LEN}文字以内にしてください")
+        return v
+
+
+class CaseFileOut(BaseModel):
+    id: int
+    filename: str
+    content: str
+
+    model_config = {"from_attributes": True}
+
+
 # --- TestCase ---
 class TestCaseCreate(BaseModel):
     input: str = ""
     expected_output: str
     order_index: int = 0
+    files: list[CaseFileCreate] = Field(default_factory=list, max_length=MAX_FILES_PER_CASE)
 
 
 class TestCaseOut(BaseModel):
@@ -54,6 +92,7 @@ class TestCaseOut(BaseModel):
     input: str
     expected_output: str
     order_index: int
+    files: list[CaseFileOut] = []
 
     model_config = {"from_attributes": True}
 
@@ -63,6 +102,7 @@ class SampleCaseCreate(BaseModel):
     input: str = ""
     expected_output: str
     order_index: int = 0
+    files: list[CaseFileCreate] = Field(default_factory=list, max_length=MAX_FILES_PER_CASE)
 
 
 class SampleCaseOut(BaseModel):
@@ -71,6 +111,7 @@ class SampleCaseOut(BaseModel):
     input: str
     expected_output: str
     order_index: int
+    files: list[CaseFileOut] = []
 
     model_config = {"from_attributes": True}
 
@@ -117,6 +158,7 @@ class ProblemOut(BaseModel):
 class ProblemImportCase(BaseModel):
     input: str = ""
     expected_output: str = ""
+    files: list[CaseFileCreate] = Field(default_factory=list, max_length=MAX_FILES_PER_CASE)
 
 
 class ProblemImportRequest(BaseModel):

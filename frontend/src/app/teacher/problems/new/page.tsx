@@ -2,25 +2,30 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { apiCreateProblem, apiAddTestCase } from '@/lib/api'
+import { apiCreateProblem, apiAddTestCase, type CaseFileDraft } from '@/lib/api'
+import CaseFileEditor from '@/components/CaseFileEditor'
 
 interface TcDraft {
   input: string
   expected_output: string
+  files: CaseFileDraft[]
 }
 
 export default function NewProblemPage() {
   const router = useRouter()
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [testCases, setTestCases] = useState<TcDraft[]>([{ input: '', expected_output: '' }])
+  const [testCases, setTestCases] = useState<TcDraft[]>([{ input: '', expected_output: '', files: [] }])
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
-  const addTc = () => setTestCases([...testCases, { input: '', expected_output: '' }])
+  const addTc = () => setTestCases([...testCases, { input: '', expected_output: '', files: [] }])
   const removeTc = (i: number) => setTestCases(testCases.filter((_, idx) => idx !== i))
-  const updateTc = (i: number, field: keyof TcDraft, value: string) => {
+  const updateTc = (i: number, field: 'input' | 'expected_output', value: string) => {
     setTestCases(testCases.map((tc, idx) => idx === i ? { ...tc, [field]: value } : tc))
+  }
+  const updateTcFiles = (i: number, files: CaseFileDraft[]) => {
+    setTestCases(testCases.map((tc, idx) => idx === i ? { ...tc, files } : tc))
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -30,7 +35,7 @@ export default function NewProblemPage() {
     try {
       const problem = await apiCreateProblem({ title, description })
       for (const tc of testCases) {
-        if (tc.input !== '' || tc.expected_output !== '') {
+        if (tc.input !== '' || tc.expected_output !== '' || tc.files.length > 0) {
           await apiAddTestCase(problem.id, tc)
         }
       }
@@ -113,6 +118,7 @@ export default function NewProblemPage() {
                     />
                   </div>
                 </div>
+                <CaseFileEditor files={tc.files} onChange={(files) => updateTcFiles(i, files)} />
               </div>
             ))}
           </div>

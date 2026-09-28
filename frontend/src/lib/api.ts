@@ -32,12 +32,25 @@ export interface User {
   is_superadmin?: boolean
 }
 
+/** テストケース・サンプルケース実行時にソース・実行ファイルと同じディレクトリに配置するファイル（*.txt, *.csv） */
+export interface CaseFile {
+  id: number
+  filename: string
+  content: string
+}
+
+export interface CaseFileDraft {
+  filename: string
+  content: string
+}
+
 export interface TestCase {
   id: number
   problem_id: number
   input: string
   expected_output: string
   order_index: number
+  files: CaseFile[]
 }
 
 export interface SampleCase {
@@ -46,6 +59,7 @@ export interface SampleCase {
   input: string
   expected_output: string
   order_index: number
+  files: CaseFile[]
 }
 
 export interface Problem {
@@ -220,7 +234,7 @@ export async function apiImportProblem(data: unknown): Promise<ProblemImportResu
   return req<ProblemImportResult>('/problems/import', { method: 'POST', body: JSON.stringify(data) })
 }
 
-export async function apiAddTestCase(problemId: number, data: { input: string; expected_output: string }): Promise<TestCase> {
+export async function apiAddTestCase(problemId: number, data: { input: string; expected_output: string; files?: CaseFileDraft[] }): Promise<TestCase> {
   return req<TestCase>(`/problems/${problemId}/test_cases`, { method: 'POST', body: JSON.stringify(data) })
 }
 
@@ -228,7 +242,7 @@ export async function apiDeleteTestCase(problemId: number, tcId: number): Promis
   return req<void>(`/problems/${problemId}/test_cases/${tcId}`, { method: 'DELETE' })
 }
 
-export async function apiAddSampleCase(problemId: number, data: { input: string; expected_output: string }): Promise<SampleCase> {
+export async function apiAddSampleCase(problemId: number, data: { input: string; expected_output: string; files?: CaseFileDraft[] }): Promise<SampleCase> {
   return req<SampleCase>(`/problems/${problemId}/sample_cases`, { method: 'POST', body: JSON.stringify(data) })
 }
 

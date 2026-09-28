@@ -52,6 +52,19 @@ class TestCase(Base):
 
     problem = relationship("Problem", back_populates="test_cases")
     submission_results = relationship("SubmissionResult", back_populates="test_case", cascade="all, delete-orphan")
+    files = relationship("TestCaseFile", back_populates="test_case", order_by="TestCaseFile.id", cascade="all, delete-orphan")
+
+
+class TestCaseFile(Base):
+    """テストケース実行時にソース・実行ファイルと同じディレクトリに配置するファイル（*.txt, *.csv）"""
+    __tablename__ = "test_case_files"
+
+    id = Column(Integer, primary_key=True, index=True)
+    test_case_id = Column(Integer, ForeignKey("test_cases.id"), nullable=False)
+    filename = Column(String, nullable=False)
+    content = Column(Text, nullable=False, default="")
+
+    test_case = relationship("TestCase", back_populates="files")
 
 
 class SampleCase(Base):
@@ -65,6 +78,19 @@ class SampleCase(Base):
     order_index = Column(Integer, nullable=False, default=0)
 
     problem = relationship("Problem", back_populates="sample_cases")
+    files = relationship("SampleCaseFile", back_populates="sample_case", order_by="SampleCaseFile.id", cascade="all, delete-orphan")
+
+
+class SampleCaseFile(Base):
+    """サンプルケース実行時にソース・実行ファイルと同じディレクトリに配置するファイル（*.txt, *.csv）"""
+    __tablename__ = "sample_case_files"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sample_case_id = Column(Integer, ForeignKey("sample_cases.id"), nullable=False)
+    filename = Column(String, nullable=False)
+    content = Column(Text, nullable=False, default="")
+
+    sample_case = relationship("SampleCase", back_populates="files")
 
 
 class Assignment(Base):

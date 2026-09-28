@@ -72,19 +72,27 @@ def import_problem(
     db.add(problem)
     db.flush()
     for i, sc in enumerate(body.sample_cases):
-        db.add(models.SampleCase(
+        sample_case = models.SampleCase(
             problem_id=problem.id,
             input=sc.input,
             expected_output=sc.expected_output,
             order_index=i,
-        ))
+        )
+        db.add(sample_case)
+        db.flush()
+        for f in sc.files:
+            db.add(models.SampleCaseFile(sample_case_id=sample_case.id, filename=f.filename, content=f.content))
     for i, tc in enumerate(body.test_cases):
-        db.add(models.TestCase(
+        test_case = models.TestCase(
             problem_id=problem.id,
             input=tc.input,
             expected_output=tc.expected_output,
             order_index=i,
-        ))
+        )
+        db.add(test_case)
+        db.flush()
+        for f in tc.files:
+            db.add(models.TestCaseFile(test_case_id=test_case.id, filename=f.filename, content=f.content))
     db.commit()
     return schemas.ProblemImportResult(title=body.title)
 
@@ -166,6 +174,9 @@ def add_test_case(
         order_index=body.order_index,
     )
     db.add(tc)
+    db.flush()
+    for f in body.files:
+        db.add(models.TestCaseFile(test_case_id=tc.id, filename=f.filename, content=f.content))
     db.commit()
     db.refresh(tc)
     return tc
@@ -208,6 +219,9 @@ def add_sample_case(
         order_index=body.order_index,
     )
     db.add(sc)
+    db.flush()
+    for f in body.files:
+        db.add(models.SampleCaseFile(sample_case_id=sc.id, filename=f.filename, content=f.content))
     db.commit()
     db.refresh(sc)
     return sc

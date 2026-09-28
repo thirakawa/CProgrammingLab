@@ -6,11 +6,12 @@ import {
   apiGetProblem, apiUpdateProblem,
   apiAddTestCase, apiDeleteTestCase,
   apiAddSampleCase, apiDeleteSampleCase,
-  type Problem, type TestCase, type SampleCase,
+  type Problem, type TestCase, type SampleCase, type CaseFile,
 } from '@/lib/api'
 import MarkdownRenderer from '@/components/MarkdownRenderer'
+import CaseFileEditor from '@/components/CaseFileEditor'
 
-type CaseForm = { input: string; expected_output: string }
+type CaseForm = { input: string; expected_output: string; files: { filename: string; content: string }[] }
 
 function CaseList({
   title,
@@ -24,7 +25,7 @@ function CaseList({
 }: {
   title: string
   badge?: string
-  cases: { id: number; input: string; expected_output: string }[]
+  cases: { id: number; input: string; expected_output: string; files: CaseFile[] }[]
   onDelete: (id: number) => Promise<void>
   onAdd: (e: React.FormEvent) => Promise<void>
   form: CaseForm
@@ -87,6 +88,18 @@ function CaseList({
                 <p className="text-xs text-gray-400 mb-1">期待出力</p>
                 <pre className="text-sm bg-gray-50 rounded p-2 font-mono whitespace-pre-wrap">{c.expected_output}</pre>
               </div>
+              {c.files.length > 0 && (
+                <div className="col-span-2">
+                  <p className="text-xs text-gray-400 mb-1">添付ファイル</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {c.files.map(f => (
+                      <span key={f.id} className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded font-mono">
+                        {f.filename}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
             <button
               type="button"
@@ -124,6 +137,7 @@ function CaseList({
             />
           </div>
         </div>
+        <CaseFileEditor files={form.files} onChange={(files) => setForm({ ...form, files })} />
         <button
           type="submit"
           disabled={adding}
@@ -148,8 +162,8 @@ export default function EditProblemPage() {
   const [maxPointers, setMaxPointers] = useState<string>('')
   const [maxLoops, setMaxLoops] = useState<string>('')
   const [maxIfs, setMaxIfs] = useState<string>('')
-  const [newTc, setNewTc] = useState<CaseForm>({ input: '', expected_output: '' })
-  const [newSc, setNewSc] = useState<CaseForm>({ input: '', expected_output: '' })
+  const [newTc, setNewTc] = useState<CaseForm>({ input: '', expected_output: '', files: [] })
+  const [newSc, setNewSc] = useState<CaseForm>({ input: '', expected_output: '', files: [] })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
@@ -208,7 +222,7 @@ export default function EditProblemPage() {
       ? { ...prev, test_cases: [...prev.test_cases, added] }
       : prev
     )
-    setNewTc({ input: '', expected_output: '' })
+    setNewTc({ input: '', expected_output: '', files: [] })
   }
 
   // サンプルケース削除：state を直接更新（再取得なし）
@@ -228,7 +242,7 @@ export default function EditProblemPage() {
       ? { ...prev, sample_cases: [...prev.sample_cases, added] }
       : prev
     )
-    setNewSc({ input: '', expected_output: '' })
+    setNewSc({ input: '', expected_output: '', files: [] })
   }
 
   if (!problem) return <p className="text-gray-400">読み込み中...</p>

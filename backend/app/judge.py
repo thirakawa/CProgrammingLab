@@ -234,9 +234,33 @@ def _compile(code: str, tmpdir: str) -> tuple[bool, str, str]:
 
 TLE_SECONDS = 5  # タイムアウト秒数
 
+# コンパイル成果物として tmpdir に残しておくファイル（添付ファイルの入れ替え時に消さない）
+_KEEP_FILES = {"main.c", "main"}
 
-def _run_one(tmpdir: str, input_data: str) -> tuple[str, str, int]:
+
+def _prepare_case_files(tmpdir: str, files) -> None:
+    """テストケース実行前に、前のケースで配置した添付ファイルを消してから今回のケースの分を書き込む
+
+    ソースコード・コンパイル済み実行ファイルと同じディレクトリ（/sandbox にマウントされる tmpdir）に
+    テストケースごとの *.txt / *.csv を配置することで、プログラムが fopen 等でファイルを開けるようにする。
+    """
+    for name in os.listdir(tmpdir):
+        if name in _KEEP_FILES:
+            continue
+        path = os.path.join(tmpdir, name)
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+    for f in files or []:
+        with open(os.path.join(tmpdir, f.filename), "w", encoding="utf-8") as fh:
+            fh.write(f.content)
+
+
+def _run_one(tmpdir: str, input_data: str, files=None) -> tuple[str, str, int]:
     """1ケース実行。(status, output, time_ms) を返す。5秒超過で TLE"""
+    _prepare_case_files(tmpdir, files)
     # コンテナに名前を付けてタイムアウト時に強制停止できるようにする
     container_name = f"cplab-{uuid.uuid4().hex[:16]}"
     start = time.monotonic()
@@ -308,7 +332,7 @@ def run_judge(
         passed = 0
 
         for tc in test_cases:
-            status_raw, output, elapsed_ms = _run_one(tmpdir, tc.input)
+            status_raw, output, elapsed_ms = _run_one(tmpdir, tc.input, tc.files)
             if status_raw == "ok":
                 if output.strip() == tc.expected_output.strip():
                     status = "accepted"
@@ -413,7 +437,7 @@ def run_sample(
 
         results: list[SampleResult] = []
         for sc in sample_cases:
-            status_raw, output, elapsed_ms = _run_one(tmpdir, sc.input)
+            status_raw, output, elapsed_ms = _run_one(tmpdir, sc.input, sc.files)
             if status_raw == "ok":
                 status = "accepted" if output.strip() == sc.expected_output.strip() else "wrong_answer"
             else:

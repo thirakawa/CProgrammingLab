@@ -22,10 +22,18 @@ function buildExportPayload(p: Problem) {
     },
     sample_cases: (p.sample_cases ?? [])
       .sort((a, b) => a.order_index - b.order_index)
-      .map(c => ({ input: c.input, expected_output: c.expected_output })),
+      .map(c => ({
+        input: c.input,
+        expected_output: c.expected_output,
+        files: (c.files ?? []).map(f => ({ filename: f.filename, content: f.content })),
+      })),
     test_cases: (p.test_cases ?? [])
       .sort((a, b) => a.order_index - b.order_index)
-      .map(c => ({ input: c.input, expected_output: c.expected_output })),
+      .map(c => ({
+        input: c.input,
+        expected_output: c.expected_output,
+        files: (c.files ?? []).map(f => ({ filename: f.filename, content: f.content })),
+      })),
   }
 }
 
