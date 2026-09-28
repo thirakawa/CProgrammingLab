@@ -57,7 +57,7 @@ CProgrammingLab/
 │   │   ├── schemas.py          # Pydantic v2 スキーマ
 │   │   ├── database.py         # DB接続（SQLite）
 │   │   ├── deps.py             # 認証依存性（get_current_user / require_teacher / require_teacher_or_ta）
-│   │   ├── judge.py            # ジャッジエンジン・採点ロジック
+│   │   ├── judge.py            # ジャッジエンジン・採点ロジック・添付ファイル配置
 │   │   └── routers/
 │   │       ├── auth.py         # ログイン・ログアウト・パスワード変更
 │   │       ├── users.py        # ユーザー CRUD・パスワードリセット（権限チェック含む）
@@ -84,6 +84,7 @@ CProgrammingLab/
 - 日時はすべてUTCでDBに保存し、表示時にJSTへ変換する
   - フロントエンド：`datetime-local` 入力は `+09:00` を付与してUTC変換（`new Date(str + '+09:00').toISOString()`）
   - バックエンド：UTC naive datetimeをJSONに返すとブラウザがローカル時刻扱いするため、フロントの `api.ts` で末尾に `Z` を付与して補正
+- ジャッジ用一時ディレクトリ（`JUDGE_TMPDIR`、docker-composeでホストとbackendコンテナ間にバインドマウント）は**`/tmp` 以下に置かない**。Ubuntuの `systemd-tmpfiles-clean.timer` により10日間未アクセスのファイルが `/tmp` から自動削除され、ホスト側ディレクトリが消えるとバインドマウントが無効化されて採点が全滅する（過去に実際に発生した障害）。デフォルトは `/var/lib/cprogramlab/judge-tmp`
 - **Claude Codeはgit操作（commit, push, branch作成・切替、mergeなど）を勝手に行わない**。ユーザーから明示的に依頼された場合のみ実行する。git操作はユーザー自身が行う運用のため、指示がない限り `git status` などの確認コマンド以外は実行しないこと
 
 ## 機能要件
@@ -98,7 +99,8 @@ CProgrammingLab/
   - 問題文・テストケース（非公開）・サンプルケース（公開）の作成・編集・削除
   - 問題文はMarkdown形式（`remark-math` / `rehype-katex` によりLaTeX数式のインライン `$...$` ／ ブロック `$$...$$` 記法に対応）
   - **コード制約**：変数・配列・ポインタ・ループ文・if文の最大数を問題ごとに指定可能（省略時は無制限）
-  - **インポート・エクスポート**：問題データを JSON 形式（1問1ファイル）で入出力可能
+  - **ファイル添付（ファイルI/O問題）**：テストケース・サンプルケースごとに `.txt` / `.csv` ファイルを複数添付可能（ファイル名は `^[A-Za-z0-9_][A-Za-z0-9_\-.]*\.(txt|csv)$` のみ許可、1ファイル最大256KB・1ケース最大5ファイル）。ジャッジ実行前にソース・実行ファイルと同じディレクトリに配置され、プログラムが `fopen` 等で読み込める。判定は標準出力の比較のみ（従来通り）。添付ファイルなしの問題は標準入出力のみで動作し完全後方互換
+  - **インポート・エクスポート**：問題データを JSON 形式（1問1ファイル、添付ファイルを含む）で入出力可能
 - **課題管理**
   - 課題の作成（問題・クラス・公開開始日時・締切日時・解答開始期限（任意）を設定）
   - **解答開始期限**：設定すると、この時刻までに初回アクセス（解答開始）しなかった学生はその課題に取り組めなくなる。公開期間（公開開始〜締切）の範囲外を指定した場合はエラー
@@ -162,11 +164,11 @@ SCORE_TIME  = 30  # 時間点（開始から3分ごとに1点減点、90分で0�
 ### 採点フロー
 1. 学生のコードをファイルに書き出す
 2. Dockerコンテナ（`cplab-{uuid}` で命名、タイムアウト後 `docker kill`）内で gcc コンパイル
-3. 各テストケース（非公開）で実行・出力比較（タイムアウト：5秒/ケース）
+3. 各テストケース（非公開）で実行・出力比較（タイムアウト：5秒/ケース）。テストケースに添付ファイルがある場合は実行直前にソース・実行ファイルと同じディレクトリへ配置し、前のケースの添付ファイルはクリアしてから書き込む（`judge.py` の `_prepare_case_files()`）
 4. コード制約チェック：ソースを静的解析し、変数・配列・ポインタ・ループ・if文数を検証
 5. 点数計算（上記の計算式）・`score_detail`（JSON）に内訳を記録
 6. 結果をDBに保存してフロントに返す
-7. サンプル実行はサンプルケースを使い、DBには保存しない（一時実行のみ）
+7. サンプル実行はサンプルケースを使い、DBには保存しない（一時実行のみ。添付ファイルの配置は同様に行う）
 
 ## DBスキーマ（主要テーブル）
 
@@ -175,7 +177,9 @@ SCORE_TIME  = 30  # 時間点（開始から3分ごとに1点減点、90分で0�
 | `users` | id, username, hashed_password, role, is_superadmin | role: teacher / ta / student |
 | `problems` | id, title, description, max_vars, max_arrays, max_pointers, max_loops, max_ifs | 制約は NULL = 無制限 |
 | `test_cases` | id, problem_id, input, expected_output, order_index | 非公開 |
+| `test_case_files` | id, test_case_id, filename, content | テストケースの添付ファイル（.txt/.csv） |
 | `sample_cases` | id, problem_id, input, expected_output, order_index | 学生に公開 |
+| `sample_case_files` | id, sample_case_id, filename, content | サンプルケースの添付ファイル（.txt/.csv） |
 | `classes` | id, name, description | クラス情報 |
 | `class_members` | class_id, user_id | 複合主キー |
 | `assignments` | id, title, problem_id, class_id, open_at, close_at, start_deadline | 日時はUTC。start_deadline は NULL = 制限なし |
@@ -199,10 +203,16 @@ SCORE_TIME  = 30  # 時間点（開始から3分ごとに1点減点、90分で0�
     "max_ifs": null
   },
   "sample_cases": [
-    { "input": "入力例", "expected_output": "出力例" }
+    {
+      "input": "入力例",
+      "expected_output": "出力例",
+      "files": [{ "filename": "data.csv", "content": "1,2,3\n" }]
+    }
   ],
   "test_cases": [
-    { "input": "テスト入力", "expected_output": "テスト出力" }
+    { "input": "テスト入力", "expected_output": "テスト出力", "files": [] }
   ]
 }
 ```
+
+`files` は省略可（省略時は添付ファイルなし＝標準入出力のみの問題）。
