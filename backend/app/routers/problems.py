@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..deps import get_current_user, require_teacher
+from ..deps import require_teacher, require_teacher_or_ta
 from .. import models, schemas
 
 router = APIRouter(prefix="/api/v1/problems", tags=["problems"])
@@ -12,21 +12,11 @@ router = APIRouter(prefix="/api/v1/problems", tags=["problems"])
 @router.get("", response_model=list[schemas.ProblemOut])
 def list_problems(
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_teacher_or_ta),
 ):
-    if current_user.role == "teacher":
-        return db.query(models.Problem).all()
-
-    # 学生: 現在公開中の課題に紐づく問題のみ
-    now = datetime.utcnow()
-    active_problem_ids = (
-        db.query(models.Assignment.problem_id)
-        .filter(models.Assignment.open_at <= now, models.Assignment.close_at >= now)
-        .distinct()
-        .all()
-    )
-    ids = [r[0] for r in active_problem_ids]
-    return db.query(models.Problem).filter(models.Problem.id.in_(ids)).all()
+    """問題一覧（テストケース・サンプルケースを含む全内容）。教員・TAのみ閲覧可能。
+    学生は非公開のテストケースを含むこの一覧にはアクセスできない（課題経由でのみ問題を閲覧する）"""
+    return db.query(models.Problem).all()
 
 
 @router.post("", response_model=schemas.ProblemOut, status_code=status.HTTP_201_CREATED)
@@ -101,8 +91,9 @@ def import_problem(
 def get_problem(
     problem_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_teacher_or_ta),
 ):
+    """問題の全内容（テストケース含む）。教員・TAのみ閲覧可能（学生は課題経由でのみ閲覧）"""
     problem = db.get(models.Problem, problem_id)
     if not problem:
         raise HTTPException(status_code=404, detail="問題が見つかりません")

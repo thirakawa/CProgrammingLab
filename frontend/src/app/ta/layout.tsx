@@ -14,6 +14,11 @@ export default function TaLayout({ children }: { children: React.ReactNode }) {
             </Link>
           </li>
           <li>
+            <Link href="/ta/problems" className="block px-3 py-2 rounded hover:bg-indigo-700 text-sm">
+              問題一覧
+            </Link>
+          </li>
+          <li>
             <Link href="/ta/account" className="block px-3 py-2 rounded hover:bg-indigo-700 text-sm">
               パスワード変更
             </Link>
