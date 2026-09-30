@@ -44,6 +44,7 @@ CProgrammingLab/
 │   │   │   └── ta/             # TA画面（教員より権限の低い補助アカウント）
 │   │   │       ├── page.tsx              # クラス一覧（閲覧のみ）
 │   │   │       ├── classes/[id]/         # 学生一覧（PWリセット）・採点結果閲覧
+│   │   │       ├── problems/             # 問題一覧・詳細（閲覧専用）
 │   │   │       ├── account/              # パスワード変更
 │   │   │       └── layout.tsx
 │   │   └── lib/
@@ -114,6 +115,7 @@ CProgrammingLab/
 ### TA側
 教員より権限の低い補助アカウント。TAアカウントの作成・削除は教員のみ可能。
 - 全クラスの学生一覧・提出状況・採点結果の閲覧（CSV / ZIP エクスポート含む）
+- 問題内容の閲覧（テストケース・サンプルケースを含む全内容。`GET /problems`, `GET /problems/{id}` は教員・TAのみアクセス可、学生は403）
 - 学生アカウントのパスワードリセット（対象は学生のみ。他のTA・教員のパスワードは変更不可）
 - 問題・クラス・ユーザーの作成・編集・削除は不可
 
@@ -182,7 +184,7 @@ SCORE_TIME  = 30  # 時間点（開始から3分ごとに1点減点、90分で0�
 | `sample_case_files` | id, sample_case_id, filename, content | サンプルケースの添付ファイル（.txt/.csv） |
 | `classes` | id, name, description | クラス情報 |
 | `class_members` | class_id, user_id | 複合主キー |
-| `assignments` | id, title, problem_id, class_id, open_at, close_at, start_deadline | 日時はUTC。start_deadline は NULL = 制限なし |
+| `assignments` | id, title, problem_id, class_id, open_at, close_at, start_deadline | 日時はUTC。start_deadline は NULL = 制限なし。idは`sqlite_autoincrement`によりID再利用を禁止（削除済み課題のAssignmentStart/Submissionが別課題に紛れ込む事故を防止） |
 | `assignment_starts` | id, assignment_id, user_id, started_at | 学生の開始時刻（サーバー側記録、UNIQUE制約） |
 | `submissions` | id, user_id, problem_id, assignment_id, code, status, score, started_at, elapsed_seconds, compile_warnings, score_detail | score_detail は JSON 文字列 |
 | `submission_results` | id, submission_id, test_case_id, status, output, time_ms | テストケースごとの結果 |
