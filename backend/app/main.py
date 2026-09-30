@@ -9,9 +9,104 @@ from . import models
 from .routers import auth, users, problems, assignments, submissions, results, classes
 
 
+def _migrate_assignments_autoincrement(conn):
+    """assignments テーブルに AUTOINCREMENT を付与し、削除後のID再利用を防ぐ
+
+    SQLiteのINTEGER PRIMARY KEYは、テーブルの全行が削除されると次のIDが1から
+    振り直される。これにより、削除した課題と同じIDを新しい課題が引き継いでしまい、
+    削除済み課題に紐づく古いAssignmentStart/Submissionレコード（開始時刻・提出履歴）が
+    新しい課題のものと誤認識される不具合が発生していたため、AUTOINCREMENTでID再利用を禁止する。
+    SQLiteはALTER TABLEでのPRIMARY KEY変更をサポートしないため、テーブルを作り直す。
+    """
+    row = conn.execute(text(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='assignments'"
+    )).fetchone()
+    if row is None or row[0] is None or "AUTOINCREMENT" in row[0].upper():
+        return  # テーブル未作成、または対応済み
+    conn.execute(text("ALTER TABLE assignments RENAME TO assignments_old_migrate"))
+    conn.execute(text("""
+        CREATE TABLE assignments (
+            id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+            title VARCHAR NOT NULL,
+            problem_id INTEGER NOT NULL,
+            class_id INTEGER,
+            open_at DATETIME NOT NULL,
+            close_at DATETIME NOT NULL,
+            start_deadline DATETIME,
+            created_by INTEGER NOT NULL,
+            created_at DATETIME,
+            FOREIGN KEY(problem_id) REFERENCES problems (id),
+            FOREIGN KEY(class_id) REFERENCES classes (id),
+            FOREIGN KEY(created_by) REFERENCES users (id)
+        )
+    """))
+    conn.execute(text("""
+        INSERT INTO assignments
+            (id, title, problem_id, class_id, open_at, close_at, start_deadline, created_by, created_at)
+        SELECT id, title, problem_id, class_id, open_at, close_at, start_deadline, created_by, created_at
+        FROM assignments_old_migrate
+    """))
+    conn.execute(text("DROP TABLE assignments_old_migrate"))
+
+
+def _cleanup_orphaned_assignment_data(conn):
+    """課題削除→ID再利用によって過去に紛れ込んだ孤立データを除去する
+
+    AssignmentStart/Submission は、その課題(assignments.created_at)より前の
+    タイムスタンプを持つことは本来あり得ない（課題が存在する前に開始・提出はできないため）。
+    そのようなレコードは、削除済み課題と同じIDを再利用した別の課題に誤って
+    結びついた過去データなので削除する。
+    """
+    conn.execute(text("""
+        DELETE FROM submission_results WHERE submission_id IN (
+            SELECT s.id FROM submissions s
+            JOIN assignments a ON a.id = s.assignment_id
+            WHERE s.assignment_id IS NOT NULL AND s.submitted_at < a.created_at
+        )
+    """))
+    conn.execute(text("""
+        DELETE FROM submissions WHERE id IN (
+            SELECT s.id FROM submissions s
+            JOIN assignments a ON a.id = s.assignment_id
+            WHERE s.assignment_id IS NOT NULL AND s.submitted_at < a.created_at
+        )
+    """))
+    conn.execute(text("""
+        DELETE FROM assignment_starts WHERE id IN (
+            SELECT st.id FROM assignment_starts st
+            JOIN assignments a ON a.id = st.assignment_id
+            WHERE st.started_at < a.created_at
+        )
+    """))
+    # 参照先の課題自体が既に存在しない（IDが再利用されずそのまま残った）純粋な孤立データも削除
+    conn.execute(text("""
+        DELETE FROM submission_results WHERE submission_id IN (
+            SELECT id FROM submissions
+            WHERE assignment_id IS NOT NULL AND assignment_id NOT IN (SELECT id FROM assignments)
+        )
+    """))
+    conn.execute(text("""
+        DELETE FROM submissions
+        WHERE assignment_id IS NOT NULL AND assignment_id NOT IN (SELECT id FROM assignments)
+    """))
+    conn.execute(text("""
+        DELETE FROM assignment_starts WHERE assignment_id NOT IN (SELECT id FROM assignments)
+    """))
+
+
 def _migrate():
     """既存DBへのカラム追加マイグレーション"""
     with engine.connect() as conn:
+        try:
+            _migrate_assignments_autoincrement(conn)
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        try:
+            _cleanup_orphaned_assignment_data(conn)
+            conn.commit()
+        except Exception:
+            conn.rollback()
         for stmt in [
             "ALTER TABLE users ADD COLUMN is_superadmin BOOLEAN NOT NULL DEFAULT 0",
             "ALTER TABLE assignments ADD COLUMN class_id INTEGER REFERENCES classes(id)",

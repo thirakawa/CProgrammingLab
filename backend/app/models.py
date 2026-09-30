@@ -95,6 +95,9 @@ class SampleCaseFile(Base):
 
 class Assignment(Base):
     __tablename__ = "assignments"
+    # 削除後にIDが再利用されるのを防ぐ（削除済み課題のAssignmentStart/Submissionが
+    # 同じIDの新しい課題に誤って結びつく事故を防止するため）
+    __table_args__ = {"sqlite_autoincrement": True}
 
     id = Column(Integer, primary_key=True, index=True)
     title = Column(String, nullable=False)
