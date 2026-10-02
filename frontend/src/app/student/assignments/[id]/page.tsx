@@ -279,6 +279,21 @@ export default function AssignmentPage() {
 
   const closeAt = new Date(assignment.close_at)
   const isExpired = closeAt < new Date()
+
+  // 締切を過ぎており、かつ提出履歴がない（未提出のまま締め切られた）場合
+  if (isExpired && mode !== 'completed') {
+    return (
+      <div>
+        <h1 className="text-2xl font-bold mb-4">{assignment.title}</h1>
+        <div className="bg-gray-100 border border-gray-300 rounded-lg p-6 text-center">
+          <p className="text-gray-700 font-medium">締切を過ぎたため、この課題は提出できません（未提出）</p>
+          <p className="text-sm text-gray-500 mt-1">
+            締切：{closeAt.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
+          </p>
+        </div>
+      </div>
+    )
+  }
   const problem = assignment.problem
   const sampleCases = problem?.sample_cases ?? []
   const hasSamples = sampleCases.length > 0

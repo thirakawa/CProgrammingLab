@@ -35,13 +35,15 @@ def list_assignments(
         return []  # クラス未所属の学生には課題なし
 
     now = datetime.utcnow()
+    # 締切を過ぎた課題も一覧には表示する（提出済みなら回答・点数の閲覧のみ可能、
+    # 未提出のまま締め切られた場合もその旨を表示する）。公開開始前の課題のみ除外する
     assignments = (
         db.query(models.Assignment)
         .filter(
             models.Assignment.class_id == member.class_id,
             models.Assignment.open_at <= now,
-            models.Assignment.close_at >= now,
         )
+        .order_by(models.Assignment.close_at.desc())
         .all()
     )
 
