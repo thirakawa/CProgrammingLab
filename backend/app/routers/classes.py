@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..deps import get_current_user, require_teacher
+from ..deps import require_teacher, require_teacher_or_ta
 from .. import models, schemas
 
 router = APIRouter(prefix="/api/v1/classes", tags=["classes"])
@@ -37,7 +37,8 @@ def _to_class_detail(c: models.Class) -> schemas.ClassDetail:
 
 
 @router.get("", response_model=list[schemas.ClassOut])
-def list_classes(db: Session = Depends(get_db), _: models.User = Depends(get_current_user)):
+def list_classes(db: Session = Depends(get_db), _: models.User = Depends(require_teacher_or_ta)):
+    """クラス一覧。教員・TAのみ閲覧可能（学生は自分の課題経由でのみ所属クラスの情報を得る）"""
     return [_to_class_out(c) for c in db.query(models.Class).order_by(models.Class.name).all()]
 
 
@@ -53,7 +54,8 @@ def create_class(body: schemas.ClassCreate, db: Session = Depends(get_db), curre
 
 
 @router.get("/{class_id}", response_model=schemas.ClassDetail)
-def get_class(class_id: int, db: Session = Depends(get_db), _: models.User = Depends(get_current_user)):
+def get_class(class_id: int, db: Session = Depends(get_db), _: models.User = Depends(require_teacher_or_ta)):
+    """クラス詳細（学生名簿含む）。教員・TAのみ閲覧可能"""
     c = db.get(models.Class, class_id)
     if not c:
         raise HTTPException(status_code=404, detail="クラスが見つかりません")
