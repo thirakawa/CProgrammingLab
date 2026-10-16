@@ -173,6 +173,14 @@ export default function ProblemsPage() {
                   <button onClick={() => handleExportOne(p)} className="text-gray-500 hover:underline text-xs">
                     エクスポート
                   </button>
+                  <a
+                    href={`/print/problems/${p.id}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-gray-500 hover:underline text-xs"
+                  >
+                    PDF
+                  </a>
                   <button
                     onClick={() => handleDelete(p.id, p.title)}
                     className="text-red-500 hover:underline text-xs"

@@ -249,7 +249,17 @@ export default function EditProblemPage() {
 
   return (
     <div className="max-w-3xl space-y-8">
-      <h1 className="text-2xl font-bold">問題編集</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">問題編集</h1>
+        <a
+          href={`/print/problems/${id}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="border border-gray-300 text-gray-700 rounded px-4 py-2 text-sm hover:bg-gray-50"
+        >
+          PDFエクスポート
+        </a>
+      </div>
       {error && <p className="text-red-500">{error}</p>}
 
       {/* 基本情報 + 制約 */}
