@@ -1,9 +1,9 @@
 import bcrypt
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..deps import create_session, delete_session, get_current_user
+from ..deps import SESSION_TTL_SECONDS, create_session, delete_session, delete_user_sessions, get_current_user
 from .. import models, schemas
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
@@ -21,12 +21,18 @@ def login(req: schemas.LoginRequest, response: Response, db: Session = Depends(g
         value=session_id,
         httponly=True,
         samesite="lax",
+        max_age=SESSION_TTL_SECONDS,
     )
     return schemas.UserOut.model_validate(user)
 
 
 @router.post("/logout")
-def logout(response: Response, current_user: models.User = Depends(get_current_user)):
+def logout(
+    response: Response,
+    session_id: str = Cookie(default=None),
+    current_user: models.User = Depends(get_current_user),
+):
+    delete_session(session_id)  # サーバー側のセッションも失効させる（Cookie削除だけでは盗まれたCookieが使い続けられる）
     response.delete_cookie("session_id")
     return {"message": "ログアウトしました"}
 
@@ -40,6 +46,7 @@ def me(current_user: models.User = Depends(get_current_user)):
 def change_password(
     body: schemas.ChangePasswordRequest,
     db: Session = Depends(get_db),
+    session_id: str = Cookie(default=None),
     current_user: models.User = Depends(get_current_user),
 ):
     if not bcrypt.checkpw(body.current_password.encode(), current_user.hashed_password.encode()):
@@ -48,4 +55,5 @@ def change_password(
         raise HTTPException(status_code=400, detail="新しいパスワードは4文字以上にしてください")
     current_user.hashed_password = bcrypt.hashpw(body.new_password.encode(), bcrypt.gensalt()).decode()
     db.commit()
+    delete_user_sessions(current_user.id, except_session=session_id)  # 他端末のセッションは失効
     return {"message": "パスワードを変更しました"}

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..deps import require_teacher, require_teacher_or_ta
+from ..deps import delete_user_sessions, require_teacher, require_teacher_or_ta
 from .. import models, schemas
 
 router = APIRouter(prefix="/api/v1/users", tags=["users"])
@@ -147,12 +147,20 @@ def update_user(
     if body.password:
         _check_password_change_allowed(current_user, user)
         user.hashed_password = _hash_password(body.password)
-    if body.role:
+    if body.role and body.role != user.role:
         if body.role not in ("teacher", "student", "ta"):
             raise HTTPException(status_code=400, detail="role は teacher・student・ta のいずれかを指定してください")
+        # ロール変更は事実上のアカウント降格・昇格なので、削除と同等の制限をかける
+        if user.is_superadmin:
+            raise HTTPException(status_code=403, detail="プライマリ管理者のロールは変更できません")
+        if user.id == current_user.id:
+            raise HTTPException(status_code=400, detail="自分自身のロールは変更できません")
+        _check_deletion_allowed(current_user, user)
         user.role = body.role
     db.commit()
     db.refresh(user)
+    if (body.password or body.role) and user.id != current_user.id:
+        delete_user_sessions(user.id)  # 変更後は再ログインさせる
     return user
 
 
@@ -171,6 +179,8 @@ def reset_password(
     user.hashed_password = _hash_password(body.password)
     db.commit()
     db.refresh(user)
+    if user.id != current_user.id:
+        delete_user_sessions(user.id)
     return user
 
 
@@ -190,3 +200,4 @@ def delete_user(
     _check_deletion_allowed(current_user, user)
     db.delete(user)
     db.commit()
+    delete_user_sessions(user_id)

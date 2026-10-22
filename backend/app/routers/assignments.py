@@ -19,6 +19,17 @@ def _validate_start_deadline(open_at: datetime, close_at: datetime, start_deadli
         )
 
 
+def ensure_student_can_access(db: Session, user: models.User, assignment: models.Assignment) -> None:
+    """学生が課題にアクセスできる（公開開始済み・自分のクラスの課題）ことを検証する"""
+    if datetime.utcnow() < assignment.open_at:
+        raise HTTPException(status_code=403, detail="この課題はまだ開始されていません")
+    member = db.query(models.ClassMember).filter(
+        models.ClassMember.user_id == user.id
+    ).first()
+    if not member or member.class_id != assignment.class_id:
+        raise HTTPException(status_code=403, detail="この課題にアクセスする権限がありません")
+
+
 @router.get("", response_model=list[schemas.AssignmentOut])
 def list_assignments(
     db: Session = Depends(get_db),
@@ -118,17 +129,9 @@ def get_assignment(
         raise HTTPException(status_code=404, detail="課題が見つかりません")
 
     if current_user.role == "student":
-        now = datetime.utcnow()
-        # 開始前はアクセス拒否
-        if now < assignment.open_at:
-            raise HTTPException(status_code=403, detail="この課題はまだ開始されていません")
-        # 自分のクラスの課題かチェック
-        member = db.query(models.ClassMember).filter(
-            models.ClassMember.user_id == current_user.id
-        ).first()
-        if not member or member.class_id != assignment.class_id:
-            raise HTTPException(status_code=403, detail="この課題にアクセスする権限がありません")
+        # 開始前・他クラスの課題はアクセス拒否
         # 締切後はアクセス可能（提出結果確認のため）— 提出はsubmitエンドポイント側でブロック
+        ensure_student_can_access(db, current_user, assignment)
 
     return assignment
 
@@ -143,6 +146,8 @@ def start_assignment(
     assignment = db.get(models.Assignment, assignment_id)
     if not assignment:
         raise HTTPException(status_code=404, detail="課題が見つかりません")
+    if current_user.role == "student":
+        ensure_student_can_access(db, current_user, assignment)
 
     # 既存の開始記録があれば返す（ページ再読み込み・再訪問対応）
     existing = db.query(models.AssignmentStart).filter_by(

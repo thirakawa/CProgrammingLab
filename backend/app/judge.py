@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -205,30 +206,87 @@ def _make_tmpdir() -> str:
     return tmpdir
 
 
+MAX_OUTPUT_BYTES = 256 * 1024  # 実行結果として保持する標準出力・標準エラーの上限
+
+# 学生コード実行用コンテナの共通の隔離オプション
+_SANDBOX_OPTS = [
+    "--network", "none",
+    "--cap-drop", "ALL",
+    "--security-opt", "no-new-privileges",
+]
+
+
+def _run_docker_capped(cmd: list[str], timeout: float, container_name: str) -> tuple[int, str, str]:
+    """docker コマンドを実行し (returncode, stdout, stderr) を返す。
+
+    出力は MAX_OUTPUT_BYTES までしかメモリに保持しない（超過分は読み捨てる）。
+    学生コードが無限に出力してもバックエンドのメモリが枯渇しないようにするため。
+    timeout 超過時は subprocess.TimeoutExpired を送出し、コンテナも強制停止する。
+    """
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    bufs: dict[str, list[bytes]] = {"out": [], "err": []}
+
+    def drain(stream, key: str) -> None:
+        size = 0
+        while True:
+            chunk = stream.read(65536)
+            if not chunk:
+                break
+            if size < MAX_OUTPUT_BYTES:
+                bufs[key].append(chunk[: MAX_OUTPUT_BYTES - size])
+            size += len(chunk)
+
+    threads = [
+        threading.Thread(target=drain, args=(proc.stdout, "out"), daemon=True),
+        threading.Thread(target=drain, args=(proc.stderr, "err"), daemon=True),
+    ]
+    for t in threads:
+        t.start()
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        subprocess.run(["docker", "kill", container_name], capture_output=True, timeout=10)
+        for t in threads:
+            t.join(timeout=5)
+        raise
+    for t in threads:
+        t.join(timeout=5)
+    # 従来の text=True と同じく改行コードを \n に正規化する
+    decode = lambda b: b"".join(b).decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\r", "\n")
+    return proc.returncode, decode(bufs["out"]), decode(bufs["err"])
+
+
 def _compile(code: str, tmpdir: str) -> tuple[bool, str, str]:
     """コンパイルを実行。(success, error_message, warnings) を返す"""
     src_path = os.path.join(tmpdir, "main.c")
     with open(src_path, "w", encoding="utf-8") as f:
         f.write(code)
 
-    result = subprocess.run(
-        [
-            "docker", "run", "--rm",
-            "-v", f"{tmpdir}:/sandbox",
-            "--network", "none",
-            "--memory", "128m",
-            "--cpus", "0.5",
-            JUDGE_IMAGE,
-            "gcc", "-Wall", "-std=c99", "-o", "/sandbox/main", "/sandbox/main.c", "-lm",
-        ],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    if result.returncode != 0:
-        return False, result.stderr or result.stdout, ""
+    container_name = f"cplab-{uuid.uuid4().hex[:16]}"
+    try:
+        returncode, stdout, stderr = _run_docker_capped(
+            [
+                "docker", "run", "--rm",
+                "--name", container_name,
+                "-v", f"{tmpdir}:/sandbox",
+                *_SANDBOX_OPTS,
+                "--memory", "128m",
+                "--memory-swap", "128m",
+                "--pids-limit", "128",
+                "--cpus", "0.5",
+                JUDGE_IMAGE,
+                "gcc", "-Wall", "-std=c99", "-o", "/sandbox/main", "/sandbox/main.c", "-lm",
+            ],
+            timeout=30,
+            container_name=container_name,
+        )
+    except subprocess.TimeoutExpired:
+        return False, "コンパイルがタイムアウトしました", ""
+    if returncode != 0:
+        return False, stderr or stdout, ""
     # returncode==0 でも stderr に警告が出る場合がある
-    warnings = result.stderr.strip()
+    warnings = stderr.strip()
     return True, "", warnings
 
 
@@ -265,34 +323,34 @@ def _run_one(tmpdir: str, input_data: str, files=None) -> tuple[str, str, int]:
     container_name = f"cplab-{uuid.uuid4().hex[:16]}"
     start = time.monotonic()
     try:
-        result = subprocess.run(
+        returncode, stdout, stderr = _run_docker_capped(
             [
                 "docker", "run", "--rm",
                 "--name", container_name,
                 "-v", f"{tmpdir}:/sandbox",
-                "--network", "none",
+                *_SANDBOX_OPTS,
                 "--memory", "64m",
+                "--memory-swap", "64m",
+                "--pids-limit", "64",
+                "--cpus", "1",
                 JUDGE_IMAGE,
                 # コンテナ内の timeout コマンドで TLE_SECONDS 後に強制終了
                 "sh", "-c",
                 f"echo {_shell_quote(input_data)} | timeout {TLE_SECONDS} /sandbox/main",
             ],
-            capture_output=True,
-            text=True,
             timeout=TLE_SECONDS + 5,  # Dockerオーバーヘッド分の余裕
+            container_name=container_name,
         )
         elapsed_ms = int((time.monotonic() - start) * 1000)
 
-        if result.returncode == 124:   # timeout コマンドの終了コード
+        if returncode == 124:   # timeout コマンドの終了コード
             return "time_limit_exceeded", "", elapsed_ms
-        if result.returncode != 0:
-            return "runtime_error", result.stderr or result.stdout, elapsed_ms
-        return "ok", result.stdout, elapsed_ms
+        if returncode != 0:
+            return "runtime_error", stderr or stdout, elapsed_ms
+        return "ok", stdout, elapsed_ms
 
     except subprocess.TimeoutExpired:
         elapsed_ms = int((time.monotonic() - start) * 1000)
-        # コンテナが残っている場合は強制停止
-        subprocess.run(["docker", "kill", container_name], capture_output=True, timeout=5)
         return "time_limit_exceeded", "", elapsed_ms
 
 

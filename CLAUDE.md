@@ -86,6 +86,9 @@ CProgrammingLab/
   - フロントエンド：`datetime-local` 入力は `+09:00` を付与してUTC変換（`new Date(str + '+09:00').toISOString()`）
   - バックエンド：UTC naive datetimeをJSONに返すとブラウザがローカル時刻扱いするため、フロントの `api.ts` で末尾に `Z` を付与して補正
 - ジャッジ用一時ディレクトリ（`JUDGE_TMPDIR`、docker-composeでホストとbackendコンテナ間にバインドマウント）は**`/tmp` 以下に置かない**。Ubuntuの `systemd-tmpfiles-clean.timer` により10日間未アクセスのファイルが `/tmp` から自動削除され、ホスト側ディレクトリが消えるとバインドマウントが無効化されて採点が全滅する（過去に実際に発生した障害）。デフォルトは `/var/lib/cprogramlab/judge-tmp`
+- セッションはメモリ上に保持（有効期限12時間）。ログアウト・パスワード変更/リセット・ロール変更・ユーザー削除でサーバー側のセッションも失効させる（`deps.py` の `delete_session` / `delete_user_sessions`）。バックエンド再起動で全員ログアウトされる
+- 学生の提出は課題の所属クラス・公開開始・課題と問題の一致を検証し、解答開始時刻と経過時間は常にサーバー側（`AssignmentStart`）で決める（クライアント申告の `elapsed_seconds` は信用しない）。開始記録なしで提出された場合は開始APIと同条件（解答開始期限）で提出時点を開始時刻として記録する
+- ジャッジのコンテナは `--network none --cap-drop ALL --no-new-privileges --pids-limit --memory-swap` で隔離し、標準出力は256KBまでしか保持しない（無限出力でバックエンドのメモリが枯渇しないため）。ソースコードは10万文字まで
 - **Claude Codeはgit操作（commit, push, branch作成・切替、mergeなど）を勝手に行わない**。ユーザーから明示的に依頼された場合のみ実行する。git操作はユーザー自身が行う運用のため、指示がない限り `git status` などの確認コマンド以外は実行しないこと
 
 ## 機能要件

@@ -1,5 +1,6 @@
 import csv
 import io
+import re
 import zipfile
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -162,7 +163,9 @@ def download_code_zip(
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for sub in subs:
             username = sub.user.username if sub.user else str(sub.user_id)
-            zf.writestr(f"{username}.c", sub.code)
+            # ユーザー名に / や .. が含まれていても、展開時にZIP外へ書き出されないようにする
+            safe_name = re.sub(r"[\\/:*?\"<>|\x00-\x1f]", "_", username).lstrip(".") or f"user_{sub.user_id}"
+            zf.writestr(f"{safe_name}.c", sub.code)
     buf.seek(0)
 
     return StreamingResponse(

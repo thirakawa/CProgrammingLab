@@ -7,12 +7,12 @@ from pydantic import BaseModel, Field, field_validator
 # --- User ---
 class UserCreate(BaseModel):
     username: str
-    password: str
+    password: str = Field(min_length=4)
     role: str = "student"
 
 
 class UserUpdate(BaseModel):
-    password: Optional[str] = None
+    password: Optional[str] = Field(default=None, min_length=4)
     role: Optional[str] = None
 
 
@@ -39,7 +39,7 @@ class ChangePasswordRequest(BaseModel):
 
 class PasswordResetRequest(BaseModel):
     """教員・TAが他ユーザーのパスワードをリセットする際に使用"""
-    password: str
+    password: str = Field(min_length=4)
 
 
 # --- テストケース／サンプルケースの添付ファイル ---
@@ -47,6 +47,7 @@ class PasswordResetRequest(BaseModel):
 _FILENAME_RE = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_\-.]{0,63}\.(txt|csv)$')
 MAX_FILE_CONTENT_LEN = 262144   # 1ファイルあたり最大256KB
 MAX_FILES_PER_CASE = 5          # 1ケースあたり最大5ファイル
+MAX_CODE_LEN = 100_000          # 学生が提出するソースコードの最大文字数
 
 
 class CaseFileCreate(BaseModel):
@@ -246,7 +247,7 @@ class AssignmentWithProblem(AssignmentOut):
 class SubmissionCreate(BaseModel):
     problem_id: int
     assignment_id: Optional[int] = None
-    code: str
+    code: str = Field(max_length=MAX_CODE_LEN)
     started_at: Optional[datetime] = None    # クライアントが記録した解答開始時刻
     elapsed_seconds: Optional[int] = None    # 解答所要秒数
 
@@ -296,7 +297,7 @@ class SubmissionSummary(BaseModel):
 # --- サンプル実行 ---
 class SampleRunRequest(BaseModel):
     problem_id: int
-    code: str
+    code: str = Field(max_length=MAX_CODE_LEN)
 
 
 class SampleCaseRunResult(BaseModel):

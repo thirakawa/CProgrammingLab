@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..deps import get_current_user, require_teacher
+from ..deps import get_current_user
+from .assignments import ensure_student_can_access
 from .. import models, schemas
 from ..judge import run_judge, run_sample
 
@@ -35,6 +36,17 @@ def run_sample_cases(
     problem = db.get(models.Problem, body.problem_id)
     if not problem:
         raise HTTPException(status_code=404, detail="問題が見つかりません")
+
+    if current_user.role == "student":
+        # 自分のクラスに公開済みの課題として出題されている問題のみ（未公開問題のサンプル閲覧を防ぐ）
+        member = db.query(models.ClassMember).filter(models.ClassMember.user_id == current_user.id).first()
+        assigned = member is not None and db.query(models.Assignment).filter(
+            models.Assignment.class_id == member.class_id,
+            models.Assignment.problem_id == problem.id,
+            models.Assignment.open_at <= datetime.utcnow(),
+        ).first() is not None
+        if not assigned:
+            raise HTTPException(status_code=403, detail="この問題を実行する権限がありません")
 
     if not problem.sample_cases:
         return schemas.SampleRunResponse(compile_error="", results=[])
@@ -84,6 +96,9 @@ def submit(
         if not assignment:
             raise HTTPException(status_code=404, detail="課題が見つかりません")
         if current_user.role == "student":
+            ensure_student_can_access(db, current_user, assignment)
+            if assignment.problem_id != body.problem_id:
+                raise HTTPException(status_code=400, detail="課題と問題が一致しません")
             now = datetime.utcnow()
             if now > assignment.close_at:
                 raise HTTPException(status_code=403, detail="提出期限が過ぎています")
@@ -98,6 +113,17 @@ def submit(
             )
             if latest and _is_perfect(latest):
                 raise HTTPException(status_code=403, detail="既に満点で提出済みのため、再提出できません")
+            # 開始記録がないまま提出された場合も、開始APIと同じ条件で今この時点を開始時刻として記録する
+            # （クライアント申告の elapsed_seconds で時間点を改ざんしたり、解答開始期限を回避できないように）
+            if not db.query(models.AssignmentStart).filter_by(
+                assignment_id=body.assignment_id, user_id=current_user.id
+            ).first():
+                if assignment.start_deadline is not None and now > assignment.start_deadline:
+                    raise HTTPException(status_code=403, detail="解答開始期限を過ぎているため、この課題に提出できません")
+                db.add(models.AssignmentStart(
+                    assignment_id=body.assignment_id, user_id=current_user.id, started_at=now,
+                ))
+                db.flush()
         # AssignmentStart から開始時刻を取得してサーバー側で elapsed_seconds を計算
         start_record = db.query(models.AssignmentStart).filter_by(
             assignment_id=body.assignment_id,
