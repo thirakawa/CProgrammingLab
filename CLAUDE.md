@@ -73,7 +73,7 @@ CProgrammingLab/
 │   └── Dockerfile
 ├── judge/                      # ジャッジ用 Docker イメージ
 │   └── Dockerfile
-├── samples/                    # サンプルデータ（problems/: 問題JSON（カテゴリ別ディレクトリ、各カテゴリの solutions/ に模範解答）、users/: 学生CSV）
+├── samples/                    # サンプルデータ（problems/: 問題JSON、users/: 学生CSV）
 ├── docker-compose.yml
 ├── .devcontainer/
 │   └── Dockerfile
