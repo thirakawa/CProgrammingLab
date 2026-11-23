@@ -13,6 +13,9 @@ function buildExportPayload(p: Problem) {
     version: VERSION,
     title: p.title,
     description: p.description,
+    problem_type: p.problem_type ?? 'program',
+    template_code: p.template_code ?? null,
+    harness_code: p.harness_code ?? null,
     constraints: {
       max_vars: p.max_vars ?? null,
       max_arrays: p.max_arrays ?? null,

@@ -162,11 +162,13 @@ export default function AssignmentPage() {
           return
         }
 
-        // 最新提出があればそのコードを読み込み、完了モードへ
+        // 最新提出があればそのコードを読み込み、完了モードへ（なければ問題の初期コード）
         if (latest) {
           setCode(latest.code)
           setCurrentResult(latest)
           setMode('completed')
+        } else if (asgn.problem?.template_code) {
+          setCode(asgn.problem.template_code)
         }
 
         // サーバー側の開始時刻を取得（初回はここで記録される）
@@ -341,6 +343,18 @@ export default function AssignmentPage() {
           <div className="mb-4">
             <MarkdownRenderer content={problem.description} />
           </div>
+
+          {/* 関数定義型の案内 */}
+          {problem.problem_type === 'function' && (
+            <div className="border border-blue-200 bg-blue-50 rounded p-3 text-sm mb-3">
+              <p className="font-medium text-blue-800 mb-1">関数定義型の問題</p>
+              <p className="text-blue-700 text-xs">
+                指定された関数だけを書いて提出します。<strong>main 関数は書かないでください</strong>
+                （採点用の main が別に用意され、あなたの関数を呼び出します）。
+                サンプル実行でも同じ採点用の main が使われます。
+              </p>
+            </div>
+          )}
 
           {/* コード制約 */}
           {constraintLines(problem).length > 0 && (

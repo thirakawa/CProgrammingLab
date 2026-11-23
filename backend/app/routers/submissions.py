@@ -7,7 +7,7 @@ from ..database import get_db
 from ..deps import get_current_user
 from .assignments import ensure_student_can_access
 from .. import models, schemas
-from ..judge import ConstraintSpec, run_judge, run_sample
+from ..judge import ConstraintSpec, HarnessError, run_judge, run_sample
 
 router = APIRouter(prefix="/api/v1/submissions", tags=["submissions"])
 
@@ -24,6 +24,9 @@ def _is_perfect(submission: models.Submission) -> bool:
     except (TypeError, ValueError):
         return False
     return all(detail.get(k, 0) == 0 for k in _DEDUCTION_KEYS)
+
+
+_HARNESS_ERROR_MESSAGE = "採点用プログラムに問題があるため実行できませんでした。提出は記録されていません。教員に連絡してください。"
 
 
 @router.post("/run", response_model=schemas.SampleRunResponse)
@@ -51,11 +54,15 @@ def run_sample_cases(
     if not problem.sample_cases:
         return schemas.SampleRunResponse(compile_error="", results=[])
 
-    result = run_sample(
-        body.code,
-        problem.sample_cases,
-        spec=ConstraintSpec.from_problem(problem),
-    )
+    try:
+        result = run_sample(
+            body.code,
+            problem.sample_cases,
+            spec=ConstraintSpec.from_problem(problem),
+            harness=problem.active_harness,
+        )
+    except HarnessError:
+        raise HTTPException(status_code=500, detail=_HARNESS_ERROR_MESSAGE)
     return schemas.SampleRunResponse(
         compile_error=result.compile_error,
         compile_warnings=result.compile_warnings,
@@ -132,12 +139,17 @@ def submit(
             actual_elapsed = int((datetime.utcnow() - start_record.started_at).total_seconds())
 
     # 採点実行（経過時間・制約値を渡す）
-    judge_result = run_judge(
-        body.code,
-        problem.test_cases,
-        spec=ConstraintSpec.from_problem(problem),
-        elapsed_seconds=actual_elapsed,
-    )
+    try:
+        judge_result = run_judge(
+            body.code,
+            problem.test_cases,
+            spec=ConstraintSpec.from_problem(problem),
+            elapsed_seconds=actual_elapsed,
+            harness=problem.active_harness,
+        )
+    except HarnessError:
+        # 採点用プログラム側の不具合は学生の責任ではないので、提出記録を作らずに中断する
+        raise HTTPException(status_code=500, detail=_HARNESS_ERROR_MESSAGE)
 
     # 下限不足（提出拒否モード）: 提出記録を作らずに拒否する
     if judge_result.rejected:

@@ -9,6 +9,8 @@ import {
   type ConstraintForm,
 } from '@/lib/constraints'
 import ConstraintEditor from '@/components/ConstraintEditor'
+import ProblemTypeEditor from '@/components/ProblemTypeEditor'
+import { emptyTypeForm, typeFormToPayload, validateTypeForm, type TypeForm } from '@/lib/problemType'
 
 interface TcDraft {
   input: string
@@ -22,6 +24,7 @@ export default function NewProblemPage() {
   const [description, setDescription] = useState('')
   const [testCases, setTestCases] = useState<TcDraft[]>([{ input: '', expected_output: '', files: [] }])
   const [constraints, setConstraints] = useState<ConstraintForm>(emptyConstraintForm())
+  const [typeForm, setTypeForm] = useState<TypeForm>(emptyTypeForm())
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -39,9 +42,15 @@ export default function NewProblemPage() {
     setError('')
     const invalid = validateConstraintForm(constraints)
     if (invalid) { setError(invalid); return }
+    const typeInvalid = validateTypeForm(typeForm)
+    if (typeInvalid) { setError(typeInvalid); return }
     setSubmitting(true)
     try {
-      const problem = await apiCreateProblem({ title, description, ...constraintFormToPayload(constraints) })
+      const problem = await apiCreateProblem({
+        title, description,
+        ...constraintFormToPayload(constraints),
+        ...typeFormToPayload(typeForm),
+      })
       for (const tc of testCases) {
         if (tc.input !== '' || tc.expected_output !== '' || tc.files.length > 0) {
           await apiAddTestCase(problem.id, tc)
@@ -86,6 +95,10 @@ export default function NewProblemPage() {
               数式はLaTeX記法で記述できます（例：インライン $x^2 + y^2 = z^2$ ／ ブロック $$\int_0^1 x\,dx$$）
             </p>
           </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <ProblemTypeEditor value={typeForm} onChange={setTypeForm} />
         </div>
 
         <div className="bg-white rounded-lg shadow p-6">

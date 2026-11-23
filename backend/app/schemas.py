@@ -132,6 +132,9 @@ class ProblemCreate(BaseModel):
     min_loops: Optional[int] = None
     min_ifs: Optional[int] = None
     constraint_mode: Literal["deduct", "reject"] = "deduct"
+    problem_type: Literal["program", "function"] = "program"
+    template_code: Optional[str] = Field(default=None, max_length=MAX_CODE_LEN)
+    harness_code: Optional[str] = Field(default=None, max_length=MAX_CODE_LEN)
 
 
 class ProblemUpdate(BaseModel):
@@ -148,6 +151,9 @@ class ProblemUpdate(BaseModel):
     min_loops: Optional[int] = None
     min_ifs: Optional[int] = None
     constraint_mode: Optional[Literal["deduct", "reject"]] = None
+    problem_type: Optional[Literal["program", "function"]] = None
+    template_code: Optional[str] = Field(default=None, max_length=MAX_CODE_LEN)
+    harness_code: Optional[str] = Field(default=None, max_length=MAX_CODE_LEN)
 
 
 class ProblemOut(BaseModel):
@@ -167,6 +173,9 @@ class ProblemOut(BaseModel):
     min_loops: Optional[int] = None
     min_ifs: Optional[int] = None
     constraint_mode: str = "deduct"
+    problem_type: str = "program"
+    template_code: Optional[str] = None
+    harness_code: Optional[str] = None
     test_cases: list[TestCaseOut] = []
     sample_cases: list[SampleCaseOut] = []
 
@@ -187,6 +196,9 @@ class ProblemImportRequest(BaseModel):
     title: str
     description: str = ""
     constraints: Optional[dict] = None
+    problem_type: Optional[str] = None
+    template_code: Optional[str] = Field(default=None, max_length=MAX_CODE_LEN)
+    harness_code: Optional[str] = Field(default=None, max_length=MAX_CODE_LEN)
     sample_cases: list[ProblemImportCase] = []
     test_cases: list[ProblemImportCase] = []
 
@@ -211,6 +223,8 @@ class ProblemForStudent(BaseModel):
     min_loops: Optional[int] = None
     min_ifs: Optional[int] = None
     constraint_mode: str = "deduct"
+    problem_type: str = "program"
+    template_code: Optional[str] = None     # harness_code は学生に返さない
     sample_cases: list[SampleCaseOut] = []
 
     model_config = {"from_attributes": True}
@@ -319,6 +333,11 @@ class SubmissionSummary(BaseModel):
 
 
 # --- サンプル実行 ---
+class ProblemVerifyRequest(BaseModel):
+    """教員が模範解答で問題（ハーネス・テストケース）を動作確認するためのリクエスト"""
+    code: str = Field(max_length=MAX_CODE_LEN)
+
+
 class SampleRunRequest(BaseModel):
     problem_id: int
     code: str = Field(max_length=MAX_CODE_LEN)

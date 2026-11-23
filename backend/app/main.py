@@ -123,6 +123,9 @@ def _migrate():
             "ALTER TABLE problems ADD COLUMN min_loops INTEGER",
             "ALTER TABLE problems ADD COLUMN min_ifs INTEGER",
             "ALTER TABLE problems ADD COLUMN constraint_mode VARCHAR NOT NULL DEFAULT 'deduct'",
+            "ALTER TABLE problems ADD COLUMN problem_type VARCHAR NOT NULL DEFAULT 'program'",
+            "ALTER TABLE problems ADD COLUMN template_code TEXT",
+            "ALTER TABLE problems ADD COLUMN harness_code TEXT",
             # 解答時間
             "ALTER TABLE submissions ADD COLUMN started_at DATETIME",
             "ALTER TABLE submissions ADD COLUMN elapsed_seconds INTEGER",

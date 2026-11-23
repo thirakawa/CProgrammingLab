@@ -42,6 +42,17 @@ class Problem(Base):
     min_ifs = Column(Integer, nullable=True)
     # 下限不足時の挙動: deduct（減点）/ reject（提出拒否）
     constraint_mode = Column(String, nullable=False, default="deduct", server_default="deduct")
+    # 問題タイプ: program（main を含む完全なプログラム）/ function（関数定義型。harness_code と結合して採点）
+    problem_type = Column(String, nullable=False, default="program", server_default="program")
+    # 学生のエディタの初期コード（関数のひな形・構造体定義など。公開）
+    template_code = Column(Text, nullable=True)
+    # 採点用ハーネス（main を含むテスト用C言語ソース。学生には非公開）
+    harness_code = Column(Text, nullable=True)
+
+    @property
+    def active_harness(self) -> str | None:
+        """ジャッジに渡すハーネス（関数定義型のときだけ有効）"""
+        return self.harness_code if self.problem_type == "function" and self.harness_code else None
 
     creator = relationship("User", back_populates="problems")
     test_cases = relationship("TestCase", back_populates="problem", order_by="TestCase.order_index", cascade="all, delete-orphan")

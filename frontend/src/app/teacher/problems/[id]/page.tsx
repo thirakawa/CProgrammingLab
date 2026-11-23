@@ -15,6 +15,11 @@ import {
   type ConstraintForm,
 } from '@/lib/constraints'
 import ConstraintEditor from '@/components/ConstraintEditor'
+import ProblemTypeEditor from '@/components/ProblemTypeEditor'
+import ProblemVerifyPanel from '@/components/ProblemVerifyPanel'
+import {
+  emptyTypeForm, typeFormFromProblem, typeFormToPayload, validateTypeForm, type TypeForm,
+} from '@/lib/problemType'
 
 type CaseForm = { input: string; expected_output: string; files: { filename: string; content: string }[] }
 
@@ -163,6 +168,7 @@ export default function EditProblemPage() {
   const [description, setDescription] = useState('')
   const [descPreview, setDescPreview] = useState(false)
   const [constraints, setConstraints] = useState<ConstraintForm>(emptyConstraintForm())
+  const [typeForm, setTypeForm] = useState<TypeForm>(emptyTypeForm())
   const [newTc, setNewTc] = useState<CaseForm>({ input: '', expected_output: '', files: [] })
   const [newSc, setNewSc] = useState<CaseForm>({ input: '', expected_output: '', files: [] })
   const [error, setError] = useState('')
@@ -174,6 +180,7 @@ export default function EditProblemPage() {
       setTitle(p.title)
       setDescription(p.description)
       setConstraints(constraintFormFromProblem(p))
+      setTypeForm(typeFormFromProblem(p))
     }).catch(e => setError(e.message))
   }, [id])
 
@@ -182,12 +189,15 @@ export default function EditProblemPage() {
     setError('')
     const invalid = validateConstraintForm(constraints)
     if (invalid) { setError(invalid); return }
+    const typeInvalid = validateTypeForm(typeForm)
+    if (typeInvalid) { setError(typeInvalid); return }
     setSaving(true)
     try {
       await apiUpdateProblem(Number(id), {
         title,
         description,
         ...constraintFormToPayload(constraints),
+        ...typeFormToPayload(typeForm),
       })
       router.push('/teacher/problems')
     } catch (e) {
@@ -304,6 +314,9 @@ export default function EditProblemPage() {
           </p>
         </div>
 
+        {/* 問題タイプ・初期コード・採点用ハーネス */}
+        <ProblemTypeEditor value={typeForm} onChange={setTypeForm} />
+
         {/* コード制約 */}
         <ConstraintEditor value={constraints} onChange={setConstraints} />
 
@@ -338,6 +351,9 @@ export default function EditProblemPage() {
         form={newTc}
         setForm={setNewTc}
       />
+
+      {/* 模範解答での動作確認（保存済みのハーネス・テストケースに対して実行） */}
+      <ProblemVerifyPanel problemId={problem.id} testCaseCount={problem.test_cases?.length ?? 0} />
     </div>
   )
 }

@@ -78,7 +78,16 @@ export interface ConstraintFields {
   constraint_mode: 'deduct' | 'reject'
 }
 
-export interface Problem extends ConstraintFields {
+/** 問題タイプ: program = main を含む完全なプログラム / function = 関数定義型（採点用ハーネスと結合して採点） */
+export type ProblemType = 'program' | 'function'
+export interface TypeFields {
+  problem_type: ProblemType
+  /** エディタの初期コード（関数のひな形など） */
+  template_code: string | null
+}
+export interface Problem extends ConstraintFields, TypeFields {
+  /** 採点用ハーネス（教員・TAのみ。学生向けAPIには含まれない） */
+  harness_code: string | null
   id: number
   title: string
   description: string
@@ -94,7 +103,7 @@ export interface Assignment {
   problem_id: number
   problem_title?: string | null
   class_id: number | null
-  problem?: ConstraintFields & {
+  problem?: ConstraintFields & TypeFields & {
     id: number
     title: string
     description: string
@@ -223,22 +232,29 @@ export async function apiGetProblem(id: number): Promise<Problem> {
   return req<Problem>(`/problems/${id}`)
 }
 
-export async function apiCreateProblem(data: Partial<ConstraintFields> & {
+export async function apiCreateProblem(data: Partial<ConstraintFields> & Partial<TypeFields> & {
   title: string
   description: string
+  harness_code?: string | null
 }): Promise<Problem> {
   return req<Problem>('/problems', { method: 'POST', body: JSON.stringify(data) })
 }
 
-export async function apiUpdateProblem(id: number, data: Partial<ConstraintFields> & {
+export async function apiUpdateProblem(id: number, data: Partial<ConstraintFields> & Partial<TypeFields> & {
   title?: string
   description?: string
+  harness_code?: string | null
 }): Promise<Problem> {
   return req<Problem>(`/problems/${id}`, { method: 'PUT', body: JSON.stringify(data) })
 }
 
 export async function apiDeleteProblem(id: number): Promise<void> {
   return req<void>(`/problems/${id}`, { method: 'DELETE' })
+}
+
+/** 模範解答を全テストケースで実行して、ハーネス・テストケースを動作確認する（教員のみ） */
+export async function apiVerifyProblem(id: number, code: string): Promise<SampleRunResponse> {
+  return req<SampleRunResponse>(`/problems/${id}/verify`, { method: 'POST', body: JSON.stringify({ code }) })
 }
 
 export interface ProblemImportResult {

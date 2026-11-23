@@ -29,6 +29,21 @@ function ProblemPrintView({ problem }: { problem: Problem }) {
         <MarkdownRenderer content={problem.description} />
       </section>
 
+      {problem.problem_type === 'function' && (
+        <section className="mb-6">
+          <h2 className="text-lg font-semibold border-b pb-1 mb-3">関数定義型の問題</h2>
+          <p className="text-sm">
+            指定された関数だけを書いて提出します。main 関数は書かないでください（採点用の main が別に用意されています）。
+          </p>
+          {problem.template_code && (
+            <>
+              <p className="text-xs text-gray-500 mt-3 mb-1">初期コード</p>
+              <pre className="border rounded p-2 text-xs font-mono whitespace-pre-wrap">{problem.template_code}</pre>
+            </>
+          )}
+        </section>
+      )}
+
       {constraints.length > 0 && (
         <section className="mb-6">
           <h2 className="text-lg font-semibold border-b pb-1 mb-3">コード制約</h2>

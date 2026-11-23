@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -5,6 +6,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..deps import require_teacher, require_teacher_or_ta
 from .. import models, schemas
+from ..judge import ConstraintSpec, HarnessError, run_sample
 
 router = APIRouter(prefix="/api/v1/problems", tags=["problems"])
 
@@ -44,6 +46,31 @@ def _apply_constraints(problem: models.Problem, values: dict) -> None:
     problem.constraint_mode = mode
 
 
+_PROBLEM_TYPES = ("program", "function")
+_TYPE_FIELDS = ["problem_type", "template_code", "harness_code"]
+
+
+def _apply_problem_type(problem: models.Problem, values: dict) -> None:
+    """問題タイプ（program / function）・初期コード・ハーネスを検証して反映する。
+    values に含まれる項目のみ上書きする。ハーネスは function 以外では使われないが、
+    タイプ切替で消えないよう値は保持する。"""
+    ptype = (values["problem_type"] if "problem_type" in values else problem.problem_type) or "program"
+    template = values["template_code"] if "template_code" in values else problem.template_code
+    harness = values["harness_code"] if "harness_code" in values else problem.harness_code
+    if ptype not in _PROBLEM_TYPES:
+        raise HTTPException(status_code=400, detail="問題タイプは program か function を指定してください")
+    template = template if template and template.strip() else None
+    harness = harness if harness and harness.strip() else None
+    if ptype == "function":
+        if harness is None:
+            raise HTTPException(status_code=400, detail="関数定義型の問題には採点用ハーネス（main関数を含むCコード）が必要です")
+        if not re.search(r"\bmain\s*\(", harness):
+            raise HTTPException(status_code=400, detail="採点用ハーネスに main 関数が見つかりません")
+    problem.problem_type = ptype
+    problem.template_code = template
+    problem.harness_code = harness
+
+
 _CONSTRAINT_FIELDS = [p + k for k, _ in _CONSTRAINT_ITEMS for p in ("max_", "min_")] + ["constraint_mode"]
 
 
@@ -69,6 +96,7 @@ def create_problem(
         created_by=current_user.id,
     )
     _apply_constraints(problem, {f: getattr(body, f) for f in _CONSTRAINT_FIELDS})
+    _apply_problem_type(problem, {f: getattr(body, f) for f in _TYPE_FIELDS})
     db.add(problem)
     db.commit()
     db.refresh(problem)
@@ -90,6 +118,12 @@ def import_problem(
     )
     # 旧形式のファイル（min_* / constraint_mode なし）は下限なし・減点モードとして扱う
     _apply_constraints(problem, {f: constraints[f] for f in _CONSTRAINT_FIELDS if constraints.get(f) is not None})
+    # 旧形式のファイル（problem_type なし）は通常のプログラム問題として取り込む
+    _apply_problem_type(problem, {
+        "problem_type": body.problem_type or "program",
+        "template_code": body.template_code,
+        "harness_code": body.harness_code,
+    })
     db.add(problem)
     db.flush()
     for i, sc in enumerate(body.sample_cases):
@@ -151,10 +185,46 @@ def update_problem(
     if changes.get("constraint_mode", "") is None:
         del changes["constraint_mode"]
     _apply_constraints(problem, changes)
+    _apply_problem_type(problem, {f: getattr(body, f) for f in _TYPE_FIELDS
+                                  if f in body.model_fields_set and (f != "problem_type" or body.problem_type is not None)})
     problem.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(problem)
     return problem
+
+
+@router.post("/{problem_id}/verify", response_model=schemas.SampleRunResponse)
+def verify_problem(
+    problem_id: int,
+    body: schemas.ProblemVerifyRequest,
+    db: Session = Depends(get_db),
+    _: models.User = Depends(require_teacher),
+):
+    """模範解答を全テストケース（非公開分）で実行して、ハーネス・テストケースの動作を確認する（DBには保存しない）。
+    ハーネス自体のコンパイルエラーは詳細つきで返す（学生向けの採点では非表示）"""
+    problem = db.get(models.Problem, problem_id)
+    if not problem:
+        raise HTTPException(status_code=404, detail="問題が見つかりません")
+    try:
+        result = run_sample(
+            body.code, problem.test_cases,
+            spec=ConstraintSpec.from_problem(problem), harness=problem.active_harness,
+        )
+    except HarnessError as e:
+        return schemas.SampleRunResponse(compile_error="【採点用ハーネスのコンパイルエラー】\n" + e.detail, results=[])
+    return schemas.SampleRunResponse(
+        compile_error=result.compile_error,
+        compile_warnings=result.compile_warnings,
+        constraint_warning=result.constraint_warning,
+        analysis=result.analysis,
+        results=[
+            schemas.SampleCaseRunResult(
+                order_index=r.order_index, input=r.input, expected_output=r.expected_output,
+                actual_output=r.actual_output, status=r.status, time_ms=r.time_ms,
+            )
+            for r in result.results
+        ],
+    )
 
 
 @router.delete("/{problem_id}", status_code=status.HTTP_204_NO_CONTENT)

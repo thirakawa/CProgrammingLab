@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { apiGetProblem, type Problem, type CaseFile } from '@/lib/api'
 import MarkdownRenderer from '@/components/MarkdownRenderer'
 import { CONSTRAINT_ITEMS, formatRange } from '@/lib/constraints'
+import { PROBLEM_TYPE_LABEL } from '@/lib/problemType'
 
 function CaseListReadOnly({
   title,
@@ -94,6 +95,25 @@ export default function TaProblemDetailPage() {
             <MarkdownRenderer content={problem.description} />
           </div>
         </div>
+
+        <div>
+          <p className="text-sm font-medium mb-1">問題タイプ</p>
+          <p className="text-sm">{PROBLEM_TYPE_LABEL[problem.problem_type ?? 'program']}</p>
+        </div>
+
+        {problem.template_code && (
+          <div>
+            <p className="text-sm font-medium mb-1">エディタの初期コード</p>
+            <pre className="text-xs bg-gray-50 border rounded p-3 font-mono whitespace-pre-wrap">{problem.template_code}</pre>
+          </div>
+        )}
+
+        {problem.problem_type === 'function' && problem.harness_code && (
+          <div>
+            <p className="text-sm font-medium mb-1">採点用ハーネス <span className="text-xs text-gray-400 font-normal">（学生には非公開）</span></p>
+            <pre className="text-xs bg-gray-50 border rounded p-3 font-mono whitespace-pre-wrap">{problem.harness_code}</pre>
+          </div>
+        )}
 
         <div>
           <p className="text-sm font-medium mb-2">コード制約</p>

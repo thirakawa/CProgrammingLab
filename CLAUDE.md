@@ -58,21 +58,22 @@ CProgrammingLab/
 │   │   ├── schemas.py          # Pydantic v2 スキーマ
 │   │   ├── database.py         # DB接続（SQLite）
 │   │   ├── deps.py             # 認証依存性（get_current_user / require_teacher / require_teacher_or_ta）
-│   │   ├── judge.py            # ジャッジエンジン・採点ロジック・添付ファイル配置・制約チェック（ConstraintSpec）
+│   │   ├── judge.py            # ジャッジエンジン・採点ロジック・添付ファイル配置・制約チェック（ConstraintSpec）・関数定義型のハーネスのビルド（`_build` / `_compile_with_harness`）
 │   │   ├── code_analyzer.py    # C言語ソースの簡易解析（トークナイザ＋宣言パーサ。変数/配列/ポインタ/ループ/ifの検出）
 │   │   └── routers/
 │   │       ├── auth.py         # ログイン・ログアウト・パスワード変更
 │   │       ├── users.py        # ユーザー CRUD・パスワードリセット（権限チェック含む）
-│   │       ├── problems.py     # 問題 CRUD・テストケース・インポート
+│   │       ├── problems.py     # 問題 CRUD・テストケース・インポート・関数定義型の動作確認（`/verify`）
 │   │       ├── assignments.py  # 課題 CRUD・開始記録・解答開始期限チェック
 │   │       ├── submissions.py  # 提出・採点・サンプル実行・満点後の再提出ブロック
 │   │       ├── results.py      # 採点結果一覧・CSV（全履歴/最新のみ）・コード閲覧・ZIP
 │   │       └── classes.py      # クラス・学生管理
-│   ├── tests/                  # 単体テスト（pytest不要: `docker exec -w /app cprogramlab-backend python -m tests.test_code_analyzer`）
+│   ├── tests/                  # 単体テスト（pytest不要: `docker exec -w /app cprogramlab-backend python -m tests.test_code_analyzer` / `tests.test_harness`）
 │   ├── scripts/                # 運用スクリプト（compare_constraint_counts.py: 旧/新カウント方式の比較。DBは読み取り専用）
 │   └── Dockerfile
 ├── judge/                      # ジャッジ用 Docker イメージ
 │   └── Dockerfile
+├── samples/                    # サンプルデータ（problems/: 問題JSON（カテゴリ別ディレクトリ、各カテゴリの solutions/ に模範解答）、users/: 学生CSV）
 ├── docker-compose.yml
 ├── .devcontainer/
 │   └── Dockerfile
@@ -92,6 +93,7 @@ CProgrammingLab/
 - セッションはメモリ上に保持（有効期限12時間）。ログアウト・パスワード変更/リセット・ロール変更・ユーザー削除でサーバー側のセッションも失効させる（`deps.py` の `delete_session` / `delete_user_sessions`）。バックエンド再起動で全員ログアウトされる
 - 学生の提出は課題の所属クラス・公開開始・課題と問題の一致を検証し、解答開始時刻と経過時間は常にサーバー側（`AssignmentStart`）で決める（クライアント申告の `elapsed_seconds` は信用しない）。開始記録なしで提出された場合は開始APIと同条件（解答開始期限）で提出時点を開始時刻として記録する
 - ジャッジのコンテナは `--network none --cap-drop ALL --no-new-privileges --pids-limit --memory-swap` で隔離し、標準出力は256KBまでしか保持しない（無限出力でバックエンドのメモリが枯渇しないため）。ソースコードは10万文字まで
+- 関数定義型：ハーネスは学生に絶対に返さない・実行コンテナに置かない。ハーネスの不具合（コンパイル失敗）時は提出を記録せず HTTP 500 を返す（学生の責任にしない）。ハーネスとのシグネチャ不一致は共通ヘッダがないため未定義動作になり得る（問題文に関数の宣言を明記する）。ハーネスの定数はバイナリに残るため、期待値はテストケース側に置く
 - **Claude Codeはgit操作（commit, push, branch作成・切替、mergeなど）を勝手に行わない**。ユーザーから明示的に依頼された場合のみ実行する。git操作はユーザー自身が行う運用のため、指示がない限り `git status` などの確認コマンド以外は実行しないこと
 
 ## 機能要件
@@ -109,6 +111,10 @@ CProgrammingLab/
     - **下限不足時の挙動（`constraint_mode`）**：`deduct`（減点・既定）または `reject`（提出拒否）。`reject` は**下限不足にのみ**作用し、上限超過は常に減点
     - 数え方は `code_analyzer.py` に集約（トークン化→宣言パース）。for文内のループ変数・グローバル変数・struct/typedef型の変数・const/static/register付きを数える。関数の仮引数・構造体メンバ・関数プロトタイプ・typedef・extern・`&x`は数えない。`int *a[3]` は配列とポインタの両方、`int **p` はポインタ1個。`int (*p)[3]` や関数ポインタ（括弧つき宣言子）は対象外（一覧には「対象外」として表示）
   - **ファイル添付（ファイルI/O問題）**：テストケース・サンプルケースごとに `.txt` / `.csv` ファイルを複数添付可能（ファイル名は `^[A-Za-z0-9_][A-Za-z0-9_\-.]*\.(txt|csv)$` のみ許可、1ファイル最大256KB・1ケース最大5ファイル）。ジャッジ実行前にソース・実行ファイルと同じディレクトリに配置され、プログラムが `fopen` 等で読み込める。判定は標準出力の比較のみ（従来通り）。添付ファイルなしの問題は標準入出力のみで動作し完全後方互換
+  - **問題の種類（`problem_type`）**：`program`（既定。学生が `main` を含むプログラム全体を書く）と `function`（**関数定義型**。学生は指定された関数だけを書き、教員が用意した非公開の `main`＝**ハーネス**が呼び出す）
+    - `function` では教員が **ハーネス（`harness_code`、`main` 必須・非公開）** と **初期コード（`template_code`、関数の雛形。学生の初期表示になる）** を登録する。ハーネスは標準入力を読んで関数を呼び、結果を標準出力に出す。期待出力は従来どおりテストケース側（DB）に持つ（ハーネスに答えを書かない）
+    - 学生に返す問題データには `harness_code` を含めない（`ProblemForStudent`）。教員・TAのみ閲覧可。`program` に切り替えてもハーネスは保持されるが採点には使われない（`Problem.active_harness`）
+    - 教員は問題編集ページの「動作確認」（`POST /problems/{id}/verify`）で模範解答を全テストケースに通し、ハーネス・テストケースの整合を提出前に確認できる
   - **インポート・エクスポート**：問題データを JSON 形式（1問1ファイル、添付ファイルを含む）で入出力可能
 - **課題管理**
   - 課題の作成（問題・クラス・公開開始日時・締切日時・解答開始期限（任意）を設定）
@@ -176,6 +182,8 @@ SCORE_TIME  = 30  # 時間点（開始から3分ごとに1点減点、90分で0�
 ### 採点フロー
 1. 学生のコードをファイルに書き出す
 2. Dockerコンテナ（`cplab-{uuid}` で命名、タイムアウト後 `docker kill`）内で gcc コンパイル
+   - **関数定義型**：学生の `main.c` を `gcc -Wall -std=c99 -c`（警告判定はこの工程のみ）、`harness.c` を `gcc -w -c` で別々にコンパイルし、`gcc -o main student.o harness.o -lm` でリンクする。`harness.c` / `*.o` は実行コンテナに渡る前に削除する（学生コードから `fopen` 等でハーネスを読めない）。ハーネスのコンパイル失敗は `HarnessError`
+   - リンクエラーは `_explain_link_error()` で学生向けに翻訳（`main` 重複 → 「main関数を定義しないでください」、未定義参照 → 「次の関数が定義されていません: …」）。ld の生出力は見せない
 3. 各テストケース（非公開）で実行・出力比較（タイムアウト：5秒/ケース）。テストケースに添付ファイルがある場合は実行直前にソース・実行ファイルと同じディレクトリへ配置し、前のケースの添付ファイルはクリアしてから書き込む（`judge.py` の `_prepare_case_files()`）
 4. コード制約チェック：`code_analyzer.analyze()` でソースを解析し、変数・配列・ポインタ・ループ・if文数を上限/下限と照合（`reject` モードで下限不足なら、ここで提出を拒否して終了）
 5. 点数計算（上記の計算式）・`score_detail`（JSON）に内訳を記録（`analysis` キーに検出した宣言一覧・各カウントも保存。旧提出には無い）
@@ -187,7 +195,7 @@ SCORE_TIME  = 30  # 時間点（開始から3分ごとに1点減点、90分で0�
 | テーブル | 主なカラム | 備考 |
 |---|---|---|
 | `users` | id, username, hashed_password, role, is_superadmin | role: teacher / ta / student |
-| `problems` | id, title, description, max_vars, max_arrays, max_pointers, max_loops, max_ifs, min_vars, min_arrays, min_pointers, min_loops, min_ifs, constraint_mode | max_*/min_* は NULL = 制約なし。constraint_mode は `deduct`/`reject`（既定 deduct）。カラムは起動時の `_migrate()` で自動追加 |
+| `problems` | id, title, description, max_vars, max_arrays, max_pointers, max_loops, max_ifs, min_vars, min_arrays, min_pointers, min_loops, min_ifs, constraint_mode, problem_type, template_code, harness_code | max_*/min_* は NULL = 制約なし。constraint_mode は `deduct`/`reject`（既定 deduct）。problem_type は `program`（既定）/`function`、template_code・harness_code は関数定義型用（NULL可）。カラムは起動時の `_migrate()` で自動追加 |
 | `test_cases` | id, problem_id, input, expected_output, order_index | 非公開 |
 | `test_case_files` | id, test_case_id, filename, content | テストケースの添付ファイル（.txt/.csv） |
 | `sample_cases` | id, problem_id, input, expected_output, order_index | 学生に公開 |
@@ -207,6 +215,9 @@ SCORE_TIME  = 30  # 時間点（開始から3分ごとに1点減点、90分で0�
   "version": "1",
   "title": "問題タイトル",
   "description": "問題文",
+  "problem_type": "program",
+  "template_code": null,
+  "harness_code": null,
   "constraints": {
     "max_vars": null,
     "max_arrays": null,
@@ -233,4 +244,4 @@ SCORE_TIME  = 30  # 時間点（開始から3分ごとに1点減点、90分で0�
 }
 ```
 
-`files` は省略可（省略時は添付ファイルなし＝標準入出力のみの問題）。`constraints` の `min_*` / `constraint_mode` も省略可（旧形式のファイル＝下限なし・減点モードとして取り込まれる）。
+`files` は省略可（省略時は添付ファイルなし＝標準入出力のみの問題）。`constraints` の `min_*` / `constraint_mode` も省略可（旧形式のファイル＝下限なし・減点モードとして取り込まれる）。`problem_type` / `template_code` / `harness_code` も省略可（省略時は `program`）。`problem_type` が `function` の場合は `harness_code`（`main` を含む）が必須。

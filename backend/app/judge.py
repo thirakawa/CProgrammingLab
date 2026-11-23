@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -236,15 +237,11 @@ def _run_docker_capped(cmd: list[str], timeout: float, container_name: str) -> t
     return proc.returncode, decode(bufs["out"]), decode(bufs["err"])
 
 
-def _compile(code: str, tmpdir: str) -> tuple[bool, str, str]:
-    """コンパイルを実行。(success, error_message, warnings) を返す"""
-    src_path = os.path.join(tmpdir, "main.c")
-    with open(src_path, "w", encoding="utf-8") as f:
-        f.write(code)
-
+def _gcc(tmpdir: str, args: list[str], timeout: int = 30) -> tuple[int, str, str]:
+    """ジャッジ用コンテナ内で gcc を実行する（tmpdir は /sandbox にマウント）。タイムアウト時は (-1, "", メッセージ)"""
     container_name = f"cplab-{uuid.uuid4().hex[:16]}"
     try:
-        returncode, stdout, stderr = _run_docker_capped(
+        return _run_docker_capped(
             [
                 "docker", "run", "--rm",
                 "--name", container_name,
@@ -255,18 +252,109 @@ def _compile(code: str, tmpdir: str) -> tuple[bool, str, str]:
                 "--pids-limit", "128",
                 "--cpus", "0.5",
                 JUDGE_IMAGE,
-                "gcc", "-Wall", "-std=c99", "-o", "/sandbox/main", "/sandbox/main.c", "-lm",
+                "gcc", *args,
             ],
-            timeout=30,
+            timeout=timeout,
             container_name=container_name,
         )
     except subprocess.TimeoutExpired:
-        return False, "コンパイルがタイムアウトしました", ""
+        return -1, "", "コンパイルがタイムアウトしました"
+
+
+def _compile(code: str, tmpdir: str) -> tuple[bool, str, str]:
+    """コンパイルを実行。(success, error_message, warnings) を返す"""
+    with open(os.path.join(tmpdir, "main.c"), "w", encoding="utf-8") as f:
+        f.write(code)
+
+    returncode, stdout, stderr = _gcc(
+        tmpdir, ["-Wall", "-std=c99", "-o", "/sandbox/main", "/sandbox/main.c", "-lm"],
+    )
+    if returncode == -1:
+        return False, stderr, ""
     if returncode != 0:
         return False, stderr or stdout, ""
     # returncode==0 でも stderr に警告が出る場合がある
-    warnings = stderr.strip()
-    return True, "", warnings
+    return True, "", stderr.strip()
+
+
+class HarnessError(Exception):
+    """採点用ハーネス自体のコンパイルに失敗した（学生のコードの問題ではない）。
+
+    detail にコンパイラの生の出力を保持する。学生には見せず、教員の動作確認でのみ表示する。
+    """
+
+    def __init__(self, detail: str):
+        super().__init__("採点用プログラムのコンパイルに失敗しました")
+        self.detail = detail
+
+
+def _explain_link_error(stderr: str) -> str:
+    """リンクエラーを学生向けの説明に変換する（ハーネスの内部情報を含む生の出力は見せない）"""
+    quote = r"[`'\u2018]([A-Za-z_][A-Za-z0-9_]*)['\u2019]"
+    multiple = list(dict.fromkeys(re.findall(r"multiple definition of " + quote, stderr)))
+    undefined = list(dict.fromkeys(re.findall(r"undefined reference to " + quote, stderr)))
+    lines = []
+    if "main" in multiple:
+        lines.append("この問題では main 関数を定義しないでください（採点用の main が別に用意されています）。")
+    others = [n for n in multiple if n != "main"]
+    if others:
+        lines.append("次の名前は採点用プログラムと重複しています。別の名前に変更してください: " + ", ".join(others))
+    if undefined:
+        lines.append(
+            "次の関数が定義されていません: " + ", ".join(undefined)
+            + "\n問題文で指定された関数名・引数・戻り値の型で定義されているか確認してください。"
+        )
+    if not lines:
+        lines.append("リンクに失敗しました。問題文で指定された関数を過不足なく定義しているか確認してください。")
+    return "\n".join(lines)
+
+
+# ハーネス方式の中間ファイル（実行コンテナにはソースを渡さないため、リンク後に削除する）
+_HARNESS_TEMP_FILES = ("harness.c", "harness.o", "student.o")
+
+
+def _compile_with_harness(code: str, harness: str, tmpdir: str) -> tuple[bool, str, str]:
+    """学生コードとハーネスを別々にコンパイルしてリンクする。(success, error_message, warnings)
+
+    ハーネスのソース・オブジェクトはリンク後に削除し、実行時の /sandbox には実行ファイルしか残さない。
+    ハーネス側のエラーは学生の責任ではないので HarnessError で通知する。
+    """
+    with open(os.path.join(tmpdir, "main.c"), "w", encoding="utf-8") as f:
+        f.write(code)
+    with open(os.path.join(tmpdir, "harness.c"), "w", encoding="utf-8") as f:
+        f.write(harness)
+    try:
+        # 1) 学生コード（main を持たないので -c でオブジェクトまで）
+        rc, out, err = _gcc(tmpdir, ["-Wall", "-std=c99", "-c", "-o", "/sandbox/student.o", "/sandbox/main.c"])
+        if rc != 0:
+            return False, err or out, ""
+        warnings = err.strip()
+
+        # 2) ハーネス（警告は無視。失敗は教員向けエラー）
+        rc, out, err = _gcc(tmpdir, ["-std=c99", "-w", "-c", "-o", "/sandbox/harness.o", "/sandbox/harness.c"])
+        if rc != 0:
+            raise HarnessError(err or out)
+
+        # 3) リンク
+        rc, out, err = _gcc(
+            tmpdir, ["-o", "/sandbox/main", "/sandbox/student.o", "/sandbox/harness.o", "-lm"],
+        )
+        if rc != 0:
+            return False, _explain_link_error(err or out), ""
+        return True, "", warnings
+    finally:
+        for name in _HARNESS_TEMP_FILES:
+            try:
+                os.remove(os.path.join(tmpdir, name))
+            except OSError:
+                pass
+
+
+def _build(code: str, harness: str | None, tmpdir: str) -> tuple[bool, str, str]:
+    """問題タイプに応じてコンパイルする（harness があればハーネス方式）"""
+    if harness:
+        return _compile_with_harness(code, harness, tmpdir)
+    return _compile(code, tmpdir)
 
 
 TLE_SECONDS = 5  # タイムアウト秒数
@@ -342,12 +430,17 @@ def run_judge(
     test_cases: list,
     spec: ConstraintSpec | None = None,
     elapsed_seconds: int | None = None,
+    harness: str | None = None,
 ) -> JudgeResult:
-    """学生のCコードをDockerコンテナ内でコンパイル・実行して採点する"""
+    """学生のCコードをDockerコンテナ内でコンパイル・実行して採点する。
+
+    harness を渡すと関数定義型（ハーネス方式）: 学生コードと harness を結合して実行する。
+    ハーネス自体のコンパイル失敗は HarnessError として送出する。
+    """
     tmpdir = _make_tmpdir()
     try:
         # コンパイル（失敗は即終了）
-        ok, err, warnings = _compile(code, tmpdir)
+        ok, err, warnings = _build(code, harness, tmpdir)
         if not ok:
             return JudgeResult(
                 status="CE",
@@ -462,11 +555,12 @@ def run_sample(
     code: str,
     sample_cases: list,
     spec: ConstraintSpec | None = None,
+    harness: str | None = None,
 ) -> SampleRunResult:
     """サンプルケースに対して実行する（採点には影響しない）。制約違反は警告として返す"""
     tmpdir = _make_tmpdir()
     try:
-        ok, err, compile_warnings = _compile(code, tmpdir)
+        ok, err, compile_warnings = _build(code, harness, tmpdir)
         if not ok:
             return SampleRunResult(compile_error=err)
 
