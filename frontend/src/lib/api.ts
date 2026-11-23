@@ -62,17 +62,28 @@ export interface SampleCase {
   files: CaseFile[]
 }
 
-export interface Problem {
-  id: number
-  title: string
-  description: string
-  created_by: number
-  created_at: string
+/** コード制約（上限 max_* / 下限 min_*。null = 制約なし） */
+export interface ConstraintFields {
   max_vars: number | null
   max_arrays: number | null
   max_pointers: number | null
   max_loops: number | null
   max_ifs: number | null
+  min_vars: number | null
+  min_arrays: number | null
+  min_pointers: number | null
+  min_loops: number | null
+  min_ifs: number | null
+  /** 下限不足時の挙動: deduct = 減点 / reject = 提出拒否（上限超過は常に減点） */
+  constraint_mode: 'deduct' | 'reject'
+}
+
+export interface Problem extends ConstraintFields {
+  id: number
+  title: string
+  description: string
+  created_by: number
+  created_at: string
   test_cases: TestCase[]
   sample_cases: SampleCase[]
 }
@@ -83,15 +94,10 @@ export interface Assignment {
   problem_id: number
   problem_title?: string | null
   class_id: number | null
-  problem?: {
+  problem?: ConstraintFields & {
     id: number
     title: string
     description: string
-    max_vars: number | null
-    max_arrays: number | null
-    max_pointers: number | null
-    max_loops: number | null
-    max_ifs: number | null
     sample_cases: SampleCase[]
   }
   open_at: string
@@ -137,10 +143,29 @@ export interface SampleCaseRunResult {
   time_ms: number
 }
 
+/** コード解析で検出された宣言（変数・配列・ポインタ） */
+export interface DetectedDeclaration {
+  line: number
+  scope: 'global' | 'local' | 'for'
+  type: string
+  name: string
+  /** 空配列 = 数え対象外 */
+  kinds: ('var' | 'array' | 'pointer')[]
+  note: string
+}
+
+export interface CodeAnalysisResult {
+  counts: { vars: number; arrays: number; pointers: number; loops: number; ifs: number }
+  declarations: DetectedDeclaration[]
+  loop_lines: number[]
+  if_lines: number[]
+}
+
 export interface SampleRunResponse {
   compile_error: string
   compile_warnings: string
   constraint_warning: string
+  analysis?: CodeAnalysisResult | null
   results: SampleCaseRunResult[]
 }
 
@@ -198,26 +223,16 @@ export async function apiGetProblem(id: number): Promise<Problem> {
   return req<Problem>(`/problems/${id}`)
 }
 
-export async function apiCreateProblem(data: {
+export async function apiCreateProblem(data: Partial<ConstraintFields> & {
   title: string
   description: string
-  max_vars?: number | null
-  max_arrays?: number | null
-  max_pointers?: number | null
-  max_loops?: number | null
-  max_ifs?: number | null
 }): Promise<Problem> {
   return req<Problem>('/problems', { method: 'POST', body: JSON.stringify(data) })
 }
 
-export async function apiUpdateProblem(id: number, data: {
+export async function apiUpdateProblem(id: number, data: Partial<ConstraintFields> & {
   title?: string
   description?: string
-  max_vars?: number | null
-  max_arrays?: number | null
-  max_pointers?: number | null
-  max_loops?: number | null
-  max_ifs?: number | null
 }): Promise<Problem> {
   return req<Problem>(`/problems/${id}`, { method: 'PUT', body: JSON.stringify(data) })
 }

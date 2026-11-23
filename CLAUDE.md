@@ -58,7 +58,8 @@ CProgrammingLab/
 │   │   ├── schemas.py          # Pydantic v2 スキーマ
 │   │   ├── database.py         # DB接続（SQLite）
 │   │   ├── deps.py             # 認証依存性（get_current_user / require_teacher / require_teacher_or_ta）
-│   │   ├── judge.py            # ジャッジエンジン・採点ロジック・添付ファイル配置
+│   │   ├── judge.py            # ジャッジエンジン・採点ロジック・添付ファイル配置・制約チェック（ConstraintSpec）
+│   │   ├── code_analyzer.py    # C言語ソースの簡易解析（トークナイザ＋宣言パーサ。変数/配列/ポインタ/ループ/ifの検出）
 │   │   └── routers/
 │   │       ├── auth.py         # ログイン・ログアウト・パスワード変更
 │   │       ├── users.py        # ユーザー CRUD・パスワードリセット（権限チェック含む）
@@ -67,6 +68,8 @@ CProgrammingLab/
 │   │       ├── submissions.py  # 提出・採点・サンプル実行・満点後の再提出ブロック
 │   │       ├── results.py      # 採点結果一覧・CSV（全履歴/最新のみ）・コード閲覧・ZIP
 │   │       └── classes.py      # クラス・学生管理
+│   ├── tests/                  # 単体テスト（pytest不要: `docker exec -w /app cprogramlab-backend python -m tests.test_code_analyzer`）
+│   ├── scripts/                # 運用スクリプト（compare_constraint_counts.py: 旧/新カウント方式の比較。DBは読み取り専用）
 │   └── Dockerfile
 ├── judge/                      # ジャッジ用 Docker イメージ
 │   └── Dockerfile
@@ -102,7 +105,9 @@ CProgrammingLab/
 - **問題管理**
   - 問題文・テストケース（非公開）・サンプルケース（公開）の作成・編集・削除
   - 問題文はMarkdown形式（`remark-math` / `rehype-katex` によりLaTeX数式のインライン `$...$` ／ ブロック `$$...$$` 記法に対応）
-  - **コード制約**：変数・配列・ポインタ・ループ文・if文の最大数を問題ごとに指定可能（省略時は無制限）
+  - **コード制約**：変数・配列・ポインタ・ループ文・if文の**上限（max_*）と下限（min_*）**を問題ごとに指定可能（空欄 = 制約なし。下限0は「下限なし」と同じで保存時にNULLへ正規化。下限＞上限は保存時エラー）
+    - **下限不足時の挙動（`constraint_mode`）**：`deduct`（減点・既定）または `reject`（提出拒否）。`reject` は**下限不足にのみ**作用し、上限超過は常に減点
+    - 数え方は `code_analyzer.py` に集約（トークン化→宣言パース）。for文内のループ変数・グローバル変数・struct/typedef型の変数・const/static/register付きを数える。関数の仮引数・構造体メンバ・関数プロトタイプ・typedef・extern・`&x`は数えない。`int *a[3]` は配列とポインタの両方、`int **p` はポインタ1個。`int (*p)[3]` や関数ポインタ（括弧つき宣言子）は対象外（一覧には「対象外」として表示）
   - **ファイル添付（ファイルI/O問題）**：テストケース・サンプルケースごとに `.txt` / `.csv` ファイルを複数添付可能（ファイル名は `^[A-Za-z0-9_][A-Za-z0-9_\-.]*\.(txt|csv)$` のみ許可、1ファイル最大256KB・1ケース最大5ファイル）。ジャッジ実行前にソース・実行ファイルと同じディレクトリに配置され、プログラムが `fopen` 等で読み込める。判定は標準出力の比較のみ（従来通り）。添付ファイルなしの問題は標準入出力のみで動作し完全後方互換
   - **インポート・エクスポート**：問題データを JSON 形式（1問1ファイル、添付ファイルを含む）で入出力可能
 - **課題管理**
@@ -162,7 +167,9 @@ SCORE_TIME  = 30  # 時間点（開始から3分ごとに1点減点、90分で0�
 | ループ文（for・while）数が制約超過 | −10点 |
 | if文数が制約超過 | −10点 |
 
-制約のない項目は減点対象外。制約違反があってもテストケースの実行は行われ、正解点は加算される。
+「制約超過」は上限超過と下限不足の両方を指す（同一項目は最大1回の減点）。制約のない項目は減点対象外。制約違反があってもテストケースの実行は行われ、正解点は加算される。
+
+**提出拒否（`constraint_mode = reject`）**：下限不足のコードは `POST /submissions` が**HTTP 422**で拒否し、提出記録（`submissions`）を作らない。判定はサーバー側のみで、コンパイル成功後に行う（コンパイルエラーは通常どおりCEとして記録）。エラー文には検出数と不足数を含む。提出回数・時間点・解答開始記録には影響しない（開始記録は拒否時も保持）。サンプル実行は拒否せず警告のみ。
 
 **満点後の再提出ブロック**：全テストケース正解（`status == "accepted"`）かつ上記減点がすべて0（＝合計100点）の提出が既にある場合、`POST /submissions` はサーバー側で403を返し、それ以上の提出を拒否する（`submissions.py` の `_is_perfect()`）。
 
@@ -170,8 +177,8 @@ SCORE_TIME  = 30  # 時間点（開始から3分ごとに1点減点、90分で0�
 1. 学生のコードをファイルに書き出す
 2. Dockerコンテナ（`cplab-{uuid}` で命名、タイムアウト後 `docker kill`）内で gcc コンパイル
 3. 各テストケース（非公開）で実行・出力比較（タイムアウト：5秒/ケース）。テストケースに添付ファイルがある場合は実行直前にソース・実行ファイルと同じディレクトリへ配置し、前のケースの添付ファイルはクリアしてから書き込む（`judge.py` の `_prepare_case_files()`）
-4. コード制約チェック：ソースを静的解析し、変数・配列・ポインタ・ループ・if文数を検証
-5. 点数計算（上記の計算式）・`score_detail`（JSON）に内訳を記録
+4. コード制約チェック：`code_analyzer.analyze()` でソースを解析し、変数・配列・ポインタ・ループ・if文数を上限/下限と照合（`reject` モードで下限不足なら、ここで提出を拒否して終了）
+5. 点数計算（上記の計算式）・`score_detail`（JSON）に内訳を記録（`analysis` キーに検出した宣言一覧・各カウントも保存。旧提出には無い）
 6. 結果をDBに保存してフロントに返す
 7. サンプル実行はサンプルケースを使い、DBには保存しない（一時実行のみ。添付ファイルの配置は同様に行う）
 
@@ -180,7 +187,7 @@ SCORE_TIME  = 30  # 時間点（開始から3分ごとに1点減点、90分で0�
 | テーブル | 主なカラム | 備考 |
 |---|---|---|
 | `users` | id, username, hashed_password, role, is_superadmin | role: teacher / ta / student |
-| `problems` | id, title, description, max_vars, max_arrays, max_pointers, max_loops, max_ifs | 制約は NULL = 無制限 |
+| `problems` | id, title, description, max_vars, max_arrays, max_pointers, max_loops, max_ifs, min_vars, min_arrays, min_pointers, min_loops, min_ifs, constraint_mode | max_*/min_* は NULL = 制約なし。constraint_mode は `deduct`/`reject`（既定 deduct）。カラムは起動時の `_migrate()` で自動追加 |
 | `test_cases` | id, problem_id, input, expected_output, order_index | 非公開 |
 | `test_case_files` | id, test_case_id, filename, content | テストケースの添付ファイル（.txt/.csv） |
 | `sample_cases` | id, problem_id, input, expected_output, order_index | 学生に公開 |
@@ -205,7 +212,13 @@ SCORE_TIME  = 30  # 時間点（開始から3分ごとに1点減点、90分で0�
     "max_arrays": null,
     "max_pointers": null,
     "max_loops": null,
-    "max_ifs": null
+    "max_ifs": null,
+    "min_vars": null,
+    "min_arrays": null,
+    "min_pointers": null,
+    "min_loops": null,
+    "min_ifs": null,
+    "constraint_mode": "deduct"
   },
   "sample_cases": [
     {
@@ -220,4 +233,4 @@ SCORE_TIME  = 30  # 時間点（開始から3分ごとに1点減点、90分で0�
 }
 ```
 
-`files` は省略可（省略時は添付ファイルなし＝標準入出力のみの問題）。
+`files` は省略可（省略時は添付ファイルなし＝標準入出力のみの問題）。`constraints` の `min_*` / `constraint_mode` も省略可（旧形式のファイル＝下限なし・減点モードとして取り込まれる）。

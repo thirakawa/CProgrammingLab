@@ -7,7 +7,7 @@ from ..database import get_db
 from ..deps import get_current_user
 from .assignments import ensure_student_can_access
 from .. import models, schemas
-from ..judge import run_judge, run_sample
+from ..judge import ConstraintSpec, run_judge, run_sample
 
 router = APIRouter(prefix="/api/v1/submissions", tags=["submissions"])
 
@@ -54,16 +54,13 @@ def run_sample_cases(
     result = run_sample(
         body.code,
         problem.sample_cases,
-        max_vars=problem.max_vars,
-        max_arrays=problem.max_arrays,
-        max_pointers=problem.max_pointers,
-        max_loops=problem.max_loops,
-        max_ifs=problem.max_ifs,
+        spec=ConstraintSpec.from_problem(problem),
     )
     return schemas.SampleRunResponse(
         compile_error=result.compile_error,
         compile_warnings=result.compile_warnings,
         constraint_warning=result.constraint_warning,
+        analysis=result.analysis,
         results=[
             schemas.SampleCaseRunResult(
                 order_index=r.order_index,
@@ -123,7 +120,8 @@ def submit(
                 db.add(models.AssignmentStart(
                     assignment_id=body.assignment_id, user_id=current_user.id, started_at=now,
                 ))
-                db.flush()
+                # 提出拒否（422）でもロールバックされないよう、開始記録はここで確定させる
+                db.commit()
         # AssignmentStart から開始時刻を取得してサーバー側で elapsed_seconds を計算
         start_record = db.query(models.AssignmentStart).filter_by(
             assignment_id=body.assignment_id,
@@ -132,6 +130,22 @@ def submit(
         if start_record:
             actual_started_at = start_record.started_at
             actual_elapsed = int((datetime.utcnow() - start_record.started_at).total_seconds())
+
+    # 採点実行（経過時間・制約値を渡す）
+    judge_result = run_judge(
+        body.code,
+        problem.test_cases,
+        spec=ConstraintSpec.from_problem(problem),
+        elapsed_seconds=actual_elapsed,
+    )
+
+    # 下限不足（提出拒否モード）: 提出記録を作らずに拒否する
+    if judge_result.rejected:
+        raise HTTPException(
+            status_code=422,
+            detail="提出できません。コードが問題の指定する下限を満たしていません。\n"
+                   + judge_result.reject_message,
+        )
 
     submission = models.Submission(
         user_id=current_user.id,
@@ -144,20 +158,7 @@ def submit(
         elapsed_seconds=actual_elapsed,
     )
     db.add(submission)
-    db.commit()
-    db.refresh(submission)
-
-    # 採点実行（経過時間・制約値を渡す）
-    judge_result = run_judge(
-        body.code,
-        problem.test_cases,
-        max_vars=problem.max_vars,
-        max_arrays=problem.max_arrays,
-        max_pointers=problem.max_pointers,
-        max_loops=problem.max_loops,
-        max_ifs=problem.max_ifs,
-        elapsed_seconds=actual_elapsed,
-    )
+    db.flush()
 
     submission.compile_warnings = judge_result.compile_warnings or None
     submission.score_detail = judge_result.score_detail or None

@@ -1,12 +1,13 @@
 import json
 import os
-import re
 import shutil
 import subprocess
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+
+from .code_analyzer import CodeAnalysis, analyze
 
 JUDGE_IMAGE = "cprogramlab-judge:latest"
 
@@ -33,6 +34,8 @@ class JudgeResult:
     constraint_error: str          # 後方互換のために保持（新採点では減点情報のみ）
     score_detail: str = ""         # JSON 形式の点数内訳
     test_results: list[TestCaseResult] = field(default_factory=list)
+    rejected: bool = False         # 下限不足による提出拒否（DBには保存しない）
+    reject_message: str = ""
 
 
 @dataclass
@@ -50,6 +53,7 @@ class SampleRunResult:
     compile_error: str
     compile_warnings: str = ""
     constraint_warning: str = ""
+    analysis: dict | None = None
     results: list[SampleResult] = field(default_factory=list)
 
 
@@ -77,121 +81,96 @@ def _calc_time_score(elapsed_seconds: int | None) -> float:
 
 
 @dataclass
-class ConstraintViolations:
-    """制約違反の詳細（フィールドが空文字 = 違反なし）"""
-    var_violation: str = ""
-    array_violation: str = ""
-    pointer_violation: str = ""
-    loop_violation: str = ""
-    if_violation: str = ""
+class ConstraintSpec:
+    """問題に設定されたコード制約（None = 制約なし）。mode は下限不足時の挙動のみに作用する"""
+    max_vars: int | None = None
+    max_arrays: int | None = None
+    max_pointers: int | None = None
+    max_loops: int | None = None
+    max_ifs: int | None = None
+    min_vars: int | None = None
+    min_arrays: int | None = None
+    min_pointers: int | None = None
+    min_loops: int | None = None
+    min_ifs: int | None = None
+    mode: str = "deduct"   # deduct（減点）/ reject（下限不足は提出拒否）
 
-    @property
-    def has_any(self) -> bool:
-        return bool(
-            self.var_violation or self.array_violation or self.pointer_violation
-            or self.loop_violation or self.if_violation
+    @classmethod
+    def from_problem(cls, p) -> "ConstraintSpec":
+        return cls(
+            max_vars=p.max_vars, max_arrays=p.max_arrays, max_pointers=p.max_pointers,
+            max_loops=p.max_loops, max_ifs=p.max_ifs,
+            min_vars=p.min_vars or None, min_arrays=p.min_arrays or None,
+            min_pointers=p.min_pointers or None, min_loops=p.min_loops or None,
+            min_ifs=p.min_ifs or None,
+            mode=p.constraint_mode or "deduct",
         )
 
     @property
+    def has_any(self) -> bool:
+        return any(v is not None for v in (
+            self.max_vars, self.max_arrays, self.max_pointers, self.max_loops, self.max_ifs,
+            self.min_vars, self.min_arrays, self.min_pointers, self.min_loops, self.min_ifs,
+        ))
+
+
+# (キー, 表示名, 単位, 検出数の取得, 上限属性, 下限属性)
+_ITEMS = [
+    ("var",  "変数の宣言数",       "個", lambda a: a.var_count,     "max_vars",     "min_vars"),
+    ("arr",  "配列の宣言数",       "個", lambda a: a.array_count,   "max_arrays",   "min_arrays"),
+    ("ptr",  "ポインタの宣言数",   "個", lambda a: a.pointer_count, "max_pointers", "min_pointers"),
+    ("loop", "ループ（for/while）の使用数", "個", lambda a: a.loop_count, "max_loops", "min_loops"),
+    ("if",   "条件分岐（if）の使用数",     "個", lambda a: a.if_count,   "max_ifs",   "min_ifs"),
+]
+
+
+@dataclass
+class ConstraintViolations:
+    """制約違反の詳細。messages / shortages のキーは var / arr / ptr / loop / if"""
+    messages: dict = field(default_factory=dict)    # 上限超過・下限不足のメッセージ（減点対象）
+    shortages: dict = field(default_factory=dict)   # 下限不足のみ（提出拒否の判定対象）
+    analysis: CodeAnalysis | None = None
+
+    def violated(self, key: str) -> bool:
+        return key in self.messages
+
+    @property
+    def has_any(self) -> bool:
+        return bool(self.messages)
+
+    @property
     def message(self) -> str:
-        parts = [m for m in [
-            self.var_violation, self.array_violation, self.pointer_violation,
-            self.loop_violation, self.if_violation,
-        ] if m]
-        return "\n".join(parts)
+        return "\n".join(self.messages.values())
+
+    @property
+    def shortage_message(self) -> str:
+        return "\n".join(self.shortages.values())
 
 
 # ---------------------------------------------------------------------------
-# コード制約チェック
+# コード制約チェック（宣言の検出は code_analyzer に委譲）
 # ---------------------------------------------------------------------------
 
-def _strip_comments(code: str) -> str:
-    """コメントと文字列リテラルを除去する"""
-    # 行コメント
-    code = re.sub(r'//[^\n]*', '', code)
-    # ブロックコメント
-    code = re.sub(r'/\*.*?\*/', '', code, flags=re.DOTALL)
-    # 文字列リテラル
-    code = re.sub(r'"(?:[^"\\]|\\.)*"', '""', code)
-    # 文字リテラル
-    code = re.sub(r"'(?:[^'\\]|\\.)*'", "''", code)
-    return code
-
-
-# C言語の基本型パターン（複合型も含む）
-_C_TYPES = (
-    r'(?:(?:unsigned|signed|long|short)\s+)*'
-    r'(?:int|char|float|double|void|bool|_Bool|size_t|'
-    r'uint8_t|uint16_t|uint32_t|uint64_t|'
-    r'int8_t|int16_t|int32_t|int64_t)'
-)
-
-# 変数宣言文のパターン: 型 宣言子リスト ;
-# 関数定義・プロトタイプ（後ろに{や(が来る）は除外
-_DECL_PAT = re.compile(
-    _C_TYPES + r'\s+([^;{}\n()]+);'
-)
-
-
-def _count_declarations(code: str) -> tuple[int, int, int]:
-    """変数・配列・ポインタの宣言数をカウントして返す (vars, arrays, pointers)"""
-    clean = _strip_comments(code)
-    var_count = arr_count = ptr_count = 0
-
-    for m in _DECL_PAT.finditer(clean):
-        decl_list = m.group(1)
-        for part in decl_list.split(','):
-            part = part.split('=')[0].strip()    # 初期化子を除去
-            if not re.search(r'[a-zA-Z_]\w*', part):
-                continue
-            if '[' in part:
-                arr_count += 1
-            elif '*' in part:
-                ptr_count += 1
-            else:
-                var_count += 1
-
-    return var_count, arr_count, ptr_count
-
-
-def _count_control_flow(code: str) -> tuple[int, int]:
-    """ループ数・if数をカウントして返す (loops, ifs)
-
-    ループ: for / while キーワードの出現回数（do-while の while も1回）
-    if: if キーワードの出現回数（else if の if も1回としてカウント）
-    """
-    clean = _strip_comments(code)
-    loops = len(re.findall(r'\b(?:for|while)\b', clean))
-    ifs = len(re.findall(r'\bif\b', clean))
-    return loops, ifs
-
-
-def check_constraints(
-    code: str,
-    max_vars: int | None,
-    max_arrays: int | None,
-    max_pointers: int | None,
-    max_loops: int | None,
-    max_ifs: int | None,
-) -> ConstraintViolations:
-    """制約チェックを実行して ConstraintViolations を返す"""
-    v = ConstraintViolations()
-    if all(x is None for x in (max_vars, max_arrays, max_pointers, max_loops, max_ifs)):
-        return v
-
-    var_count, arr_count, ptr_count = _count_declarations(code)
-    loop_count, if_count = _count_control_flow(code)
-
-    if max_vars is not None and var_count > max_vars:
-        v.var_violation = f"変数の宣言数が制限を超えています（宣言数: {var_count}, 上限: {max_vars}）"
-    if max_arrays is not None and arr_count > max_arrays:
-        v.array_violation = f"配列の宣言数が制限を超えています（宣言数: {arr_count}, 上限: {max_arrays}）"
-    if max_pointers is not None and ptr_count > max_pointers:
-        v.pointer_violation = f"ポインタの宣言数が制限を超えています（宣言数: {ptr_count}, 上限: {max_pointers}）"
-    if max_loops is not None and loop_count > max_loops:
-        v.loop_violation = f"ループ（for/while）の使用数が制限を超えています（使用数: {loop_count}, 上限: {max_loops}）"
-    if max_ifs is not None and if_count > max_ifs:
-        v.if_violation = f"条件分岐（if）の使用数が制限を超えています（使用数: {if_count}, 上限: {max_ifs}）"
+def check_constraints(code: str, spec: ConstraintSpec) -> ConstraintViolations:
+    """コードを解析し、上限超過・下限不足を ConstraintViolations として返す"""
+    analysis = analyze(code)
+    v = ConstraintViolations(analysis=analysis)
+    for key, label, unit, getter, max_attr, min_attr in _ITEMS:
+        count = getter(analysis)
+        upper = getattr(spec, max_attr)
+        lower = getattr(spec, min_attr)
+        if upper is not None and count > upper:
+            v.messages[key] = (
+                f"{label}が上限を超えています（検出: {count}{unit}、上限: {upper}{unit}、"
+                f"{count - upper}{unit}超過）"
+            )
+        elif lower is not None and lower > 0 and count < lower:
+            msg = (
+                f"{label}が不足しています（検出: {count}{unit}、必要: {lower}{unit}以上、"
+                f"あと{lower - count}{unit}）"
+            )
+            v.messages[key] = msg
+            v.shortages[key] = msg
     return v
 
 
@@ -361,11 +340,7 @@ def _run_one(tmpdir: str, input_data: str, files=None) -> tuple[str, str, int]:
 def run_judge(
     code: str,
     test_cases: list,
-    max_vars: int | None = None,
-    max_arrays: int | None = None,
-    max_pointers: int | None = None,
-    max_loops: int | None = None,
-    max_ifs: int | None = None,
+    spec: ConstraintSpec | None = None,
     elapsed_seconds: int | None = None,
 ) -> JudgeResult:
     """学生のCコードをDockerコンテナ内でコンパイル・実行して採点する"""
@@ -382,8 +357,19 @@ def run_judge(
                 constraint_error="",
             )
 
-        # 制約チェック（違反しても実行継続、減点で対応）
-        violations = check_constraints(code, max_vars, max_arrays, max_pointers, max_loops, max_ifs)
+        # 制約チェック（上限超過・下限不足は減点。reject モードの下限不足のみ提出拒否）
+        spec = spec or ConstraintSpec()
+        violations = check_constraints(code, spec)
+        if spec.mode == "reject" and violations.shortages:
+            return JudgeResult(
+                status="REJECTED",
+                score=0.0,
+                compile_error="",
+                compile_warnings=warnings,
+                constraint_error=violations.shortage_message,
+                rejected=True,
+                reject_message=violations.shortage_message,
+            )
 
         # 各テストケースを実行
         test_results: list[TestCaseResult] = []
@@ -415,11 +401,11 @@ def run_judge(
         score_time  = _calc_time_score(elapsed_seconds)
 
         deduct_warn = float(DEDUCT_WARN) if warnings else 0.0
-        deduct_var  = float(DEDUCT_VAR)  if violations.var_violation     else 0.0
-        deduct_arr  = float(DEDUCT_ARR)  if violations.array_violation   else 0.0
-        deduct_ptr  = float(DEDUCT_PTY)  if violations.pointer_violation else 0.0
-        deduct_loop = float(DEDUCT_LOOP) if violations.loop_violation    else 0.0
-        deduct_if   = float(DEDUCT_IF)   if violations.if_violation      else 0.0
+        deduct_var  = float(DEDUCT_VAR)  if violations.violated("var")  else 0.0
+        deduct_arr  = float(DEDUCT_ARR)  if violations.violated("arr")  else 0.0
+        deduct_ptr  = float(DEDUCT_PTY)  if violations.violated("ptr")  else 0.0
+        deduct_loop = float(DEDUCT_LOOP) if violations.violated("loop") else 0.0
+        deduct_if   = float(DEDUCT_IF)   if violations.violated("if")   else 0.0
 
         total_deduct = deduct_warn + deduct_var + deduct_arr + deduct_ptr + deduct_loop + deduct_if
         final_score = max(0.0, score_base + score_clear + score_time - total_deduct)
@@ -439,6 +425,7 @@ def run_judge(
             "passed":       passed,
             "total_cases":  total,
             "constraint_message": violations.message,
+            "analysis":     violations.analysis.to_dict() if violations.analysis else None,
         }, ensure_ascii=False)
 
         # 全体ステータスはテストケース結果のみで決定
@@ -474,11 +461,7 @@ def run_judge(
 def run_sample(
     code: str,
     sample_cases: list,
-    max_vars: int | None = None,
-    max_arrays: int | None = None,
-    max_pointers: int | None = None,
-    max_loops: int | None = None,
-    max_ifs: int | None = None,
+    spec: ConstraintSpec | None = None,
 ) -> SampleRunResult:
     """サンプルケースに対して実行する（採点には影響しない）。制約違反は警告として返す"""
     tmpdir = _make_tmpdir()
@@ -488,9 +471,7 @@ def run_sample(
             return SampleRunResult(compile_error=err)
 
         # 制約チェック（違反しても実行は続行し、警告として返す）
-        violations = check_constraints(
-            code, max_vars, max_arrays, max_pointers, max_loops, max_ifs
-        )
+        violations = check_constraints(code, spec or ConstraintSpec())
         constraint_warning = violations.message
 
         results: list[SampleResult] = []
@@ -514,6 +495,7 @@ def run_sample(
             compile_error="",
             compile_warnings=compile_warnings,
             constraint_warning=constraint_warning,
+            analysis=violations.analysis.to_dict() if violations.analysis else None,
             results=results,
         )
 

@@ -5,15 +5,10 @@ import { useParams } from 'next/navigation'
 import { apiGetProblem, type Problem } from '@/lib/api'
 import MarkdownRenderer from '@/components/MarkdownRenderer'
 import RoleGuard from '@/components/RoleGuard'
+import { constraintLines, hasMinConstraint } from '@/lib/constraints'
 
 function ProblemPrintView({ problem }: { problem: Problem }) {
-  const constraints = [
-    { label: '変数の最大宣言数', value: problem.max_vars },
-    { label: '配列の最大宣言数', value: problem.max_arrays },
-    { label: 'ポインタの最大宣言数', value: problem.max_pointers },
-    { label: 'ループ（for/while）の最大使用数', value: problem.max_loops },
-    { label: 'if の最大使用数（else if も1つとしてカウント）', value: problem.max_ifs },
-  ].filter(c => c.value != null)
+  const constraints = constraintLines(problem)
 
   const sampleCases = problem.sample_cases ?? []
 
@@ -39,9 +34,19 @@ function ProblemPrintView({ problem }: { problem: Problem }) {
           <h2 className="text-lg font-semibold border-b pb-1 mb-3">コード制約</h2>
           <ul className="list-disc pl-5 text-sm space-y-1">
             {constraints.map(c => (
-              <li key={c.label}>{c.label}：{c.value}</li>
+              <li key={c.key}>
+                {c.label}：{c.text}
+                {c.key === 'ifs' && '（else if も1つとしてカウント）'}
+              </li>
             ))}
           </ul>
+          {hasMinConstraint(problem) && (
+            <p className="text-xs text-gray-600 mt-2">
+              {problem.constraint_mode === 'reject'
+                ? '※ 下限に満たないコードは提出できません（上限を超えた場合は減点されます）。'
+                : '※ 範囲を外れると減点されます。'}
+            </p>
+          )}
         </section>
       )}
 

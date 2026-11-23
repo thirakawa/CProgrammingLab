@@ -5,10 +5,12 @@ import { useParams } from 'next/navigation'
 import {
   apiGetAssignment, apiStartAssignment, apiGetMyLatestSubmission,
   apiSubmit, apiRunSample,
-  type Assignment, type Submission, type SampleRunResponse,
+  type Assignment, type Submission, type SampleRunResponse, type CodeAnalysisResult,
 } from '@/lib/api'
+import { constraintLines, hasMinConstraint } from '@/lib/constraints'
 import dynamic from 'next/dynamic'
 import MarkdownRenderer from '@/components/MarkdownRenderer'
+import DetectedDeclarations from '@/components/DetectedDeclarations'
 
 const CodeEditor = dynamic(() => import('@/components/CodeEditor'), { ssr: false })
 
@@ -66,6 +68,8 @@ interface ScoreDetail {
   passed: number
   total_cases: number
   constraint_message: string
+  /** 旧形式の提出には含まれない */
+  analysis?: CodeAnalysisResult | null
 }
 
 function ScoreBreakdown({ detail }: { detail: ScoreDetail }) {
@@ -74,11 +78,11 @@ function ScoreBreakdown({ detail }: { detail: ScoreDetail }) {
     + detail.deduct_ptr + detail.deduct_loop + detail.deduct_if
   const deductions: { label: string; value: number }[] = [
     { label: 'コンパイル警告',          value: detail.deduct_warn },
-    { label: '変数数超過（制約違反）',   value: detail.deduct_var },
-    { label: '配列数超過（制約違反）',   value: detail.deduct_arr },
-    { label: 'ポインタ数超過（制約違反）', value: detail.deduct_ptr },
-    { label: 'ループ数超過（制約違反）', value: detail.deduct_loop },
-    { label: 'if文数超過（制約違反）',   value: detail.deduct_if },
+    { label: '変数数の制約違反',     value: detail.deduct_var },
+    { label: '配列数の制約違反',     value: detail.deduct_arr },
+    { label: 'ポインタ数の制約違反', value: detail.deduct_ptr },
+    { label: 'ループ数の制約違反',   value: detail.deduct_loop },
+    { label: 'if文数の制約違反',     value: detail.deduct_if },
   ].filter(d => d.value > 0)
 
   return (
@@ -120,6 +124,9 @@ function ScoreBreakdown({ detail }: { detail: ScoreDetail }) {
           )}
         </tbody>
       </table>
+      {detail.constraint_message && (
+        <pre className="mt-3 text-xs text-red-600 whitespace-pre-wrap">{detail.constraint_message}</pre>
+      )}
     </div>
   )
 }
@@ -325,7 +332,7 @@ export default function AssignmentPage() {
           </span>
         )}
       </div>
-      {error && <p className="text-red-500 mb-4">{error}</p>}
+      {error && <p className="text-red-500 mb-4 whitespace-pre-line">{error}</p>}
 
       {/* 問題文 */}
       {problem && (
@@ -336,17 +343,24 @@ export default function AssignmentPage() {
           </div>
 
           {/* コード制約 */}
-          {(problem.max_vars != null || problem.max_arrays != null || problem.max_pointers != null ||
-            problem.max_loops != null || problem.max_ifs != null) && (
+          {constraintLines(problem).length > 0 && (
             <div className="border border-yellow-200 bg-yellow-50 rounded p-3 text-sm">
               <p className="font-medium text-yellow-800 mb-1">コード制約</p>
               <ul className="text-yellow-700 space-y-0.5 text-xs">
-                {problem.max_vars != null && <li>変数の最大宣言数：{problem.max_vars}</li>}
-                {problem.max_arrays != null && <li>配列の最大宣言数：{problem.max_arrays}</li>}
-                {problem.max_pointers != null && <li>ポインタの最大宣言数：{problem.max_pointers}</li>}
-                {problem.max_loops != null && <li>ループ（for/while）の最大使用数：{problem.max_loops}</li>}
-                {problem.max_ifs != null && <li>条件分岐（if）の最大使用数：{problem.max_ifs}（else if も1つとしてカウント）</li>}
+                {constraintLines(problem).map(c => (
+                  <li key={c.key}>
+                    {c.label}：{c.text}
+                    {c.key === 'ifs' && '（else if も1つとしてカウント）'}
+                  </li>
+                ))}
               </ul>
+              {hasMinConstraint(problem) && (
+                <p className="text-xs text-yellow-700 mt-2">
+                  {problem.constraint_mode === 'reject'
+                    ? '※ 下限に満たないコードは提出できません（上限を超えた場合は減点されます）。'
+                    : '※ 範囲を外れると減点されます。'}
+                </p>
+              )}
             </div>
           )}
 
@@ -447,11 +461,17 @@ export default function AssignmentPage() {
               )}
               {sampleResult.constraint_warning && (
                 <div className="bg-orange-50 border border-orange-300 rounded p-3 mb-4">
-                  <p className="text-sm font-medium text-orange-800 mb-1">⚠ コード制約違反（本番提出では不正解または減点対象になります）</p>
+                  <p className="text-sm font-medium text-orange-800 mb-1">
+                    ⚠ コード制約を満たしていません
+                    {problem?.constraint_mode === 'reject' && hasMinConstraint(problem)
+                      ? '（下限不足は本番提出では受け付けられません。上限超過は減点されます）'
+                      : '（本番提出では減点されます）'}
+                  </p>
                   <pre className="text-xs text-orange-700 whitespace-pre-wrap">{sampleResult.constraint_warning}</pre>
                 </div>
               )}
-              <div className="space-y-3">
+              <DetectedDeclarations analysis={sampleResult.analysis} constraints={problem} />
+              <div className="space-y-3 mt-4">
                 {sampleResult.results.map((r, i) => {
                   const s = STATUS_LABELS[r.status] ?? { label: r.status, cls: 'text-gray-600' }
                   const isAC = r.status === 'accepted'
@@ -516,7 +536,12 @@ export default function AssignmentPage() {
           {currentResult.score_detail && (() => {
             try {
               const d: ScoreDetail = JSON.parse(currentResult.score_detail!)
-              return <ScoreBreakdown detail={d} />
+              return (
+                <>
+                  <ScoreBreakdown detail={d} />
+                  <DetectedDeclarations analysis={d.analysis} />
+                </>
+              )
             } catch { return null }
           })()}
 

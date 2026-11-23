@@ -4,6 +4,11 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { apiCreateProblem, apiAddTestCase, type CaseFileDraft } from '@/lib/api'
 import CaseFileEditor from '@/components/CaseFileEditor'
+import {
+  constraintFormFromProblem, constraintFormToPayload, emptyConstraintForm, validateConstraintForm,
+  type ConstraintForm,
+} from '@/lib/constraints'
+import ConstraintEditor from '@/components/ConstraintEditor'
 
 interface TcDraft {
   input: string
@@ -16,6 +21,7 @@ export default function NewProblemPage() {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [testCases, setTestCases] = useState<TcDraft[]>([{ input: '', expected_output: '', files: [] }])
+  const [constraints, setConstraints] = useState<ConstraintForm>(emptyConstraintForm())
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -31,9 +37,11 @@ export default function NewProblemPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+    const invalid = validateConstraintForm(constraints)
+    if (invalid) { setError(invalid); return }
     setSubmitting(true)
     try {
-      const problem = await apiCreateProblem({ title, description })
+      const problem = await apiCreateProblem({ title, description, ...constraintFormToPayload(constraints) })
       for (const tc of testCases) {
         if (tc.input !== '' || tc.expected_output !== '' || tc.files.length > 0) {
           await apiAddTestCase(problem.id, tc)
@@ -78,6 +86,10 @@ export default function NewProblemPage() {
               数式はLaTeX記法で記述できます（例：インライン $x^2 + y^2 = z^2$ ／ ブロック $$\int_0^1 x\,dx$$）
             </p>
           </div>
+        </div>
+
+        <div className="bg-white rounded-lg shadow p-6">
+          <ConstraintEditor value={constraints} onChange={setConstraints} />
         </div>
 
         <div className="bg-white rounded-lg shadow p-6">

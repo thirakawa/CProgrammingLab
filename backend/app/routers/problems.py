@@ -8,6 +8,44 @@ from .. import models, schemas
 
 router = APIRouter(prefix="/api/v1/problems", tags=["problems"])
 
+_CONSTRAINT_ITEMS = [("vars", "変数"), ("arrays", "配列"), ("pointers", "ポインタ"), ("loops", "ループ"), ("ifs", "if文")]
+_CONSTRAINT_MODES = ("deduct", "reject")
+
+
+def _apply_constraints(problem: models.Problem, values: dict) -> None:
+    """制約値（max_* / min_* / constraint_mode）を検証して problem に反映する。
+    values に含まれる項目のみ上書きし、含まれない項目は problem の現在値を保つ。
+    下限の 0 は「下限なし」と同じなので None に正規化する。"""
+    merged = {}
+    for key, _ in _CONSTRAINT_ITEMS:
+        for prefix in ("max_", "min_"):
+            attr = prefix + key
+            merged[attr] = values[attr] if attr in values else getattr(problem, attr)
+    mode = values["constraint_mode"] if "constraint_mode" in values else problem.constraint_mode
+    mode = mode or "deduct"
+    if mode not in _CONSTRAINT_MODES:
+        raise HTTPException(status_code=400, detail="下限不足時の挙動は deduct か reject を指定してください")
+
+    for key, label in _CONSTRAINT_ITEMS:
+        for prefix, kind in (("max_", "上限"), ("min_", "下限")):
+            v = merged[prefix + key]
+            if v is None:
+                continue
+            if isinstance(v, bool) or not isinstance(v, int) or v < 0 or v > 1000:
+                raise HTTPException(status_code=400, detail=f"{label}の{kind}は0以上1000以下の整数で指定してください")
+        if merged["min_" + key] == 0:
+            merged["min_" + key] = None
+        lo, hi = merged["min_" + key], merged["max_" + key]
+        if lo is not None and hi is not None and lo > hi:
+            raise HTTPException(status_code=400, detail=f"{label}の下限（{lo}）が上限（{hi}）を超えています")
+
+    for attr, v in merged.items():
+        setattr(problem, attr, v)
+    problem.constraint_mode = mode
+
+
+_CONSTRAINT_FIELDS = [p + k for k, _ in _CONSTRAINT_ITEMS for p in ("max_", "min_")] + ["constraint_mode"]
+
 
 @router.get("", response_model=list[schemas.ProblemOut])
 def list_problems(
@@ -29,12 +67,8 @@ def create_problem(
         title=body.title,
         description=body.description,
         created_by=current_user.id,
-        max_vars=body.max_vars,
-        max_arrays=body.max_arrays,
-        max_pointers=body.max_pointers,
-        max_loops=body.max_loops,
-        max_ifs=body.max_ifs,
     )
+    _apply_constraints(problem, {f: getattr(body, f) for f in _CONSTRAINT_FIELDS})
     db.add(problem)
     db.commit()
     db.refresh(problem)
@@ -53,12 +87,9 @@ def import_problem(
         title=body.title,
         description=body.description,
         created_by=current_user.id,
-        max_vars=constraints.get("max_vars"),
-        max_arrays=constraints.get("max_arrays"),
-        max_pointers=constraints.get("max_pointers"),
-        max_loops=constraints.get("max_loops"),
-        max_ifs=constraints.get("max_ifs"),
     )
+    # 旧形式のファイル（min_* / constraint_mode なし）は下限なし・減点モードとして扱う
+    _apply_constraints(problem, {f: constraints[f] for f in _CONSTRAINT_FIELDS if constraints.get(f) is not None})
     db.add(problem)
     db.flush()
     for i, sc in enumerate(body.sample_cases):
@@ -116,16 +147,10 @@ def update_problem(
         problem.description = body.description
     # 制約値は明示的に None を渡すと「制限なし」にリセットできる
     # ProblemUpdate のフィールドはすべて Optional なので model_fields_set で判定
-    if "max_vars" in body.model_fields_set:
-        problem.max_vars = body.max_vars
-    if "max_arrays" in body.model_fields_set:
-        problem.max_arrays = body.max_arrays
-    if "max_pointers" in body.model_fields_set:
-        problem.max_pointers = body.max_pointers
-    if "max_loops" in body.model_fields_set:
-        problem.max_loops = body.max_loops
-    if "max_ifs" in body.model_fields_set:
-        problem.max_ifs = body.max_ifs
+    changes = {f: getattr(body, f) for f in _CONSTRAINT_FIELDS if f in body.model_fields_set}
+    if changes.get("constraint_mode", "") is None:
+        del changes["constraint_mode"]
+    _apply_constraints(problem, changes)
     problem.updated_at = datetime.utcnow()
     db.commit()
     db.refresh(problem)

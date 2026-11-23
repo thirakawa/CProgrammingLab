@@ -34,6 +34,14 @@ class Problem(Base):
     max_pointers = Column(Integer, nullable=True)
     max_loops = Column(Integer, nullable=True)
     max_ifs = Column(Integer, nullable=True)
+    # 下限制約（None = 下限なし。0 は保存時に None へ正規化）
+    min_vars = Column(Integer, nullable=True)
+    min_arrays = Column(Integer, nullable=True)
+    min_pointers = Column(Integer, nullable=True)
+    min_loops = Column(Integer, nullable=True)
+    min_ifs = Column(Integer, nullable=True)
+    # 下限不足時の挙動: deduct（減点）/ reject（提出拒否）
+    constraint_mode = Column(String, nullable=False, default="deduct", server_default="deduct")
 
     creator = relationship("User", back_populates="problems")
     test_cases = relationship("TestCase", back_populates="problem", order_by="TestCase.order_index", cascade="all, delete-orphan")

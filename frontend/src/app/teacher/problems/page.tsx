@@ -19,6 +19,12 @@ function buildExportPayload(p: Problem) {
       max_pointers: p.max_pointers ?? null,
       max_loops: p.max_loops ?? null,
       max_ifs: p.max_ifs ?? null,
+      min_vars: p.min_vars ?? null,
+      min_arrays: p.min_arrays ?? null,
+      min_pointers: p.min_pointers ?? null,
+      min_loops: p.min_loops ?? null,
+      min_ifs: p.min_ifs ?? null,
+      constraint_mode: p.constraint_mode ?? 'deduct',
     },
     sample_cases: (p.sample_cases ?? [])
       .sort((a, b) => a.order_index - b.order_index)

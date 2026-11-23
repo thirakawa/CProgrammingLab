@@ -1,6 +1,6 @@
 import re
 from datetime import datetime
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -126,6 +126,12 @@ class ProblemCreate(BaseModel):
     max_pointers: Optional[int] = None
     max_loops: Optional[int] = None
     max_ifs: Optional[int] = None
+    min_vars: Optional[int] = None
+    min_arrays: Optional[int] = None
+    min_pointers: Optional[int] = None
+    min_loops: Optional[int] = None
+    min_ifs: Optional[int] = None
+    constraint_mode: Literal["deduct", "reject"] = "deduct"
 
 
 class ProblemUpdate(BaseModel):
@@ -136,6 +142,12 @@ class ProblemUpdate(BaseModel):
     max_pointers: Optional[int] = None
     max_loops: Optional[int] = None
     max_ifs: Optional[int] = None
+    min_vars: Optional[int] = None
+    min_arrays: Optional[int] = None
+    min_pointers: Optional[int] = None
+    min_loops: Optional[int] = None
+    min_ifs: Optional[int] = None
+    constraint_mode: Optional[Literal["deduct", "reject"]] = None
 
 
 class ProblemOut(BaseModel):
@@ -149,6 +161,12 @@ class ProblemOut(BaseModel):
     max_pointers: Optional[int] = None
     max_loops: Optional[int] = None
     max_ifs: Optional[int] = None
+    min_vars: Optional[int] = None
+    min_arrays: Optional[int] = None
+    min_pointers: Optional[int] = None
+    min_loops: Optional[int] = None
+    min_ifs: Optional[int] = None
+    constraint_mode: str = "deduct"
     test_cases: list[TestCaseOut] = []
     sample_cases: list[SampleCaseOut] = []
 
@@ -187,6 +205,12 @@ class ProblemForStudent(BaseModel):
     max_pointers: Optional[int] = None
     max_loops: Optional[int] = None
     max_ifs: Optional[int] = None
+    min_vars: Optional[int] = None
+    min_arrays: Optional[int] = None
+    min_pointers: Optional[int] = None
+    min_loops: Optional[int] = None
+    min_ifs: Optional[int] = None
+    constraint_mode: str = "deduct"
     sample_cases: list[SampleCaseOut] = []
 
     model_config = {"from_attributes": True}
@@ -313,6 +337,7 @@ class SampleRunResponse(BaseModel):
     compile_error: str = ""
     compile_warnings: str = ""
     constraint_warning: str = ""
+    analysis: Optional[dict] = None
     results: list[SampleCaseRunResult] = []
 
 

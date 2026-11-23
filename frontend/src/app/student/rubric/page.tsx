@@ -108,35 +108,35 @@ export default function RubricPage() {
             </tr>
             <tr>
               <td className="px-3 py-2 text-gray-700">
-                使用した変数の数が制限を超えた
+                使用した変数の数が指定の範囲から外れた（上限超過・下限不足）
                 <span className="ml-1 text-xs text-gray-400">※問題に制約がある場合のみ</span>
               </td>
               <td className="px-3 py-2 text-right text-red-500 font-semibold">−20点</td>
             </tr>
             <tr>
               <td className="px-3 py-2 text-gray-700">
-                使用した配列の数が制限を超えた
+                使用した配列の数が指定の範囲から外れた（上限超過・下限不足）
                 <span className="ml-1 text-xs text-gray-400">※問題に制約がある場合のみ</span>
               </td>
               <td className="px-3 py-2 text-right text-red-500 font-semibold">−20点</td>
             </tr>
             <tr>
               <td className="px-3 py-2 text-gray-700">
-                使用したポインタの数が制限を超えた
+                使用したポインタの数が指定の範囲から外れた（上限超過・下限不足）
                 <span className="ml-1 text-xs text-gray-400">※問題に制約がある場合のみ</span>
               </td>
               <td className="px-3 py-2 text-right text-red-500 font-semibold">−20点</td>
             </tr>
             <tr>
               <td className="px-3 py-2 text-gray-700">
-                使用したループ文（for・while）の数が制限を超えた
+                使用したループ文（for・while）の数が指定の範囲から外れた（上限超過・下限不足）
                 <span className="ml-1 text-xs text-gray-400">※問題に制約がある場合のみ</span>
               </td>
               <td className="px-3 py-2 text-right text-red-500 font-semibold">−10点</td>
             </tr>
             <tr>
               <td className="px-3 py-2 text-gray-700">
-                使用した if 文の数が制限を超えた
+                使用した if 文の数が指定の範囲から外れた（上限超過・下限不足）
                 <span className="ml-1 text-xs text-gray-400">※問題に制約がある場合のみ</span>
               </td>
               <td className="px-3 py-2 text-right text-red-500 font-semibold">−10点</td>
@@ -144,11 +144,23 @@ export default function RubricPage() {
           </tbody>
         </table>
 
-        <p className="text-xs text-gray-400 mt-3">
-          コード制約（変数・配列・ポインタ・ループ・if 文の上限数）は問題ごとに異なります。
-          制約がない項目については減点されません。
-          制約の有無と上限数は、各課題の問題文に記載されています。
-        </p>
+        <div className="text-xs text-gray-500 mt-3 space-y-1">
+          <p>
+            コード制約（変数・配列・ポインタ・ループ・if 文の下限数・上限数）は問題ごとに異なります。
+            制約がない項目については減点されません。制約の有無と範囲（例：「変数：2個以上5個以下」）は、各課題の問題文に記載されています。
+          </p>
+          <p>
+            上限を超えた場合は、いずれの問題でも上記のとおり減点されます。
+            下限に満たない場合は、問題の設定により「減点」または「提出を受け付けない」のどちらかになります。
+            提出を受け付けない場合は、コンパイルが通った後に検出数と不足数が表示され、提出回数・時間点には影響しません（修正して再度提出してください）。
+          </p>
+          <p>
+            数える対象は、変数・配列・ポインタの宣言（for 文の中の <code>int i</code> も含む）です。
+            関数の仮引数・構造体のメンバ・関数プロトタイプは数えません。
+            <code>int *a[3]</code> は配列とポインタの両方に数えます。
+            採点結果・サンプル実行結果には、検出された宣言の一覧が表示されます。
+          </p>
+        </div>
       </div>
 
       {/* 計算例 */}

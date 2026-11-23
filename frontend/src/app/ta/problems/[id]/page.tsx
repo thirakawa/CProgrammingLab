@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { apiGetProblem, type Problem, type CaseFile } from '@/lib/api'
 import MarkdownRenderer from '@/components/MarkdownRenderer'
+import { CONSTRAINT_ITEMS, formatRange } from '@/lib/constraints'
 
 function CaseListReadOnly({
   title,
@@ -72,13 +73,10 @@ export default function TaProblemDetailPage() {
   if (error) return <p className="text-red-500">{error}</p>
   if (!problem) return <p className="text-gray-400">読み込み中...</p>
 
-  const constraints = [
-    { label: '変数の最大数', value: problem.max_vars },
-    { label: '配列の最大数', value: problem.max_arrays },
-    { label: 'ポインタの最大数', value: problem.max_pointers },
-    { label: 'ループの最大数', value: problem.max_loops },
-    { label: 'if の最大数', value: problem.max_ifs },
-  ]
+  const constraints = CONSTRAINT_ITEMS.map(it => ({
+    label: it.label,
+    value: formatRange(problem[`min_${it.key}`], problem[`max_${it.key}`]),
+  }))
 
   return (
     <div className="max-w-3xl space-y-8">
@@ -103,10 +101,13 @@ export default function TaProblemDetailPage() {
             {constraints.map(c => (
               <div key={c.label}>
                 <p className="text-xs text-gray-500 mb-1">{c.label}</p>
-                <p className="text-sm">{c.value ?? '無制限'}</p>
+                <p className="text-sm">{c.value ?? '制約なし'}</p>
               </div>
             ))}
           </div>
+          <p className="text-xs text-gray-500 mt-2">
+            下限不足時：{problem.constraint_mode === 'reject' ? '提出を拒否' : '減点'}（上限超過は常に減点）
+          </p>
         </div>
       </div>
 
