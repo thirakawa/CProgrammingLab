@@ -31,6 +31,16 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
               </Link>
             </li>
             <li>
+              <Link href="/student/library" className="block px-3 py-2 rounded hover:bg-green-700 text-sm">
+                標準ライブラリ
+              </Link>
+            </li>
+            <li>
+              <Link href="/student/ascii" className="block px-3 py-2 rounded hover:bg-green-700 text-sm">
+                ASCIIコード表
+              </Link>
+            </li>
+            <li>
               <Link href="/student/account" className="block px-3 py-2 rounded hover:bg-green-700 text-sm">
                 パスワード変更
               </Link>
